@@ -1,3 +1,5 @@
+import com.github.gradle.node.npm.task.NpmTask
+
 plugins {
     base
     id("com.github.node-gradle.node") version "7.1.0" apply false
@@ -15,10 +17,29 @@ project(":web-components") {
     }
 }
 
+apply(plugin = "com.github.node-gradle.node")
+extensions.configure<com.github.gradle.node.NodeExtension> {
+    download.set(false)
+    nodeProjectDir.set(rootDir)
+    workDir.set(layout.buildDirectory.dir("nodejs"))
+    npmWorkDir.set(layout.buildDirectory.dir("npm"))
+    yarnWorkDir.set(layout.buildDirectory.dir("yarn"))
+}
+
+val npmInstall = tasks.named<NpmTask>("npmInstall") {
+    description = "Installs all workspace npm dependencies."
+    group = "build"
+    args.set(listOf("install"))
+    dependsOn(":flow-components:syncFlowOverlays")
+    inputs.file("package.json")
+    inputs.file("package-lock.json")
+    outputs.dir("node_modules")
+}
+
 tasks.register("install") {
     description = "Installs dependencies for all subprojects."
     group = "build"
-    dependsOn(":web-components:install", ":flow-components:install")
+    dependsOn(":web-components:install", ":flow-components:install", npmInstall)
 }
 
 tasks.named("build") {
