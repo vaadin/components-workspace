@@ -1,1 +1,31 @@
-// Tasks for the :flow-components subproject. Populated in a later task.
+import org.gradle.internal.os.OperatingSystem
+
+val mvnCommand = if (OperatingSystem.current().isWindows) "mvn.cmd" else "mvn"
+
+tasks.register("install") {
+    description = "No-op for flow-components — Maven resolves dependencies on demand. Kept for task-surface symmetry with :web-components."
+    group = "build"
+}
+
+tasks.register<Exec>("build") {
+    description = "Runs `mvn -DskipTests install` in the flow-components submodule."
+    group = "build"
+    workingDir = projectDir
+    commandLine(mvnCommand, "-DskipTests", "install")
+    dependsOn("install")
+}
+
+tasks.register<Exec>("test") {
+    description = "Runs `mvn test` in the flow-components submodule."
+    group = "verification"
+    workingDir = projectDir
+    commandLine(mvnCommand, "test")
+    dependsOn("build")
+}
+
+tasks.register<Exec>("clean") {
+    description = "Runs `mvn clean` in the flow-components submodule."
+    group = "build"
+    workingDir = projectDir
+    commandLine(mvnCommand, "clean")
+}
