@@ -94,7 +94,7 @@ components-workspace/
 └── flow-components/                          # submodule — tracked files untouched
     └── vaadin-button-flow-parent/
         └── vaadin-button-flow-integration-tests/
-            └── package.json -> ../../../../flow-components-overlay/vaadin-button-flow-parent/vaadin-button-flow-integration-tests/package.json
+            └── package.json -> ../../../flow-components-overlay/vaadin-button-flow-parent/vaadin-button-flow-integration-tests/package.json
 ```
 
 `.gitignore` additions at the workspace root:
