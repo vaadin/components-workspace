@@ -6,14 +6,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is a **workspace repository** for coordinated development across two Vaadin repositories, included as git submodules:
 
-- `web-components/` — [vaadin/web-components](https://github.com/vaadin/web-components) (TypeScript/Lit, pnpm/yarn)
+- `web-components/` — [vaadin/web-components](https://github.com/vaadin/web-components) (TypeScript/Lit, Yarn)
 - `flow-components/` — [vaadin/flow-components](https://github.com/vaadin/flow-components) (Java Flow wrappers, Maven)
 
 Each submodule has its own `CLAUDE.md` with build/test commands and architecture details — read those when working inside a submodule. The workspace itself contains no code; it only tracks which commits of each repo are paired together.
 
 ## When Working in a Submodule
 
-`cd` into the submodule first. Build and test commands only work from inside the submodule directory — do not run them from the workspace root. The two submodules use unrelated toolchains (pnpm/yarn vs. Maven) and cannot be built together from the root.
+`cd` into the submodule first. Build and test commands only work from inside the submodule directory — do not run them from the workspace root. The two submodules use unrelated toolchains (Yarn vs. Maven) and cannot be built together from the root.
 
 ## Submodule Workflows
 
@@ -42,6 +42,23 @@ git commit -m "Point submodules to feature branches"
 ```
 
 The workspace commit records the submodule SHAs, not the branch names — the branch tracking only affects `git submodule update --remote`.
+
+## Workspace-Level Build
+
+A Gradle build at the workspace root orchestrates both submodules behind a uniform task surface:
+
+| Command | What it does |
+|---|---|
+| `./gradlew install` | `yarn install` in web-components + Maven warm-up (no-op) in flow-components |
+| `./gradlew build` | web-components install + `mvn -DskipTests install` in flow-components |
+| `./gradlew test` | `yarn test` (changed packages) + `mvn test` |
+| `./gradlew clean` | remove `node_modules/` + `mvn clean` |
+
+Use `./gradlew :web-components:<task>` or `./gradlew :flow-components:<task>` to target a single subproject. The submodules remain independently buildable from inside their own directories — the Gradle build is additive, not a replacement.
+
+Build files live at the workspace root (`build.gradle.kts`, `settings.gradle.kts`, `gradle/*.kts`); nothing is added inside the submodules.
+
+flow-components currently requires Node ≤ 24 (Node 25 breaks `vaadin-charts-flow-svg-generator`'s mocha tests via a `localStorage` API change in jsdom).
 
 ## Cross-Repo Integration
 

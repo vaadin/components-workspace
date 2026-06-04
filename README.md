@@ -5,8 +5,8 @@ Workspace for coordinated development across Vaadin's web-components and flow-co
 ## Prerequisites
 
 - Git 2.13+ (for submodule branch tracking)
-- Node.js 18+ and pnpm (for web-components)
-- Java 17+ and Maven 3.8+ (for flow-components)
+- Node.js 18–24 and Yarn (for web-components; Node 25+ breaks the upstream `vaadin-charts-flow-svg-generator` build)
+- JDK 21+ and Maven 3.8+ (for flow-components)
 
 ## Setup
 
@@ -55,20 +55,33 @@ git submodule status
 
 ## Building
 
-### web-components
+The workspace exposes Gradle tasks that orchestrate both submodules:
 
 ```bash
-cd web-components
-pnpm install
-pnpm build
+./gradlew install   # yarn install (web-components) + Maven warm-up (no-op)
+./gradlew build     # web-components ready + mvn -DskipTests install
+./gradlew test      # yarn test (web-components, changed packages) + mvn test
+./gradlew clean     # remove node_modules + mvn clean
 ```
 
-### flow-components
+Run a single subproject's task by prefixing the subproject path:
 
 ```bash
-cd flow-components
-mvn install
+./gradlew :web-components:build
+./gradlew :flow-components:test
 ```
+
+The submodules' native commands continue to work directly inside each submodule:
+
+```bash
+# web-components
+cd web-components && yarn install
+
+# flow-components
+cd flow-components && mvn install
+```
+
+See `docs/superpowers/specs/2026-06-04-common-gradle-build-design.md` for design details.
 
 ## Future Plans
 
