@@ -1,0 +1,8 @@
+{
+  "name": "@vaadin-flow-integration-tests/date-picker",
+  "private": true,
+  "version": "0.0.0",
+  "dependencies": {
+    "@vaadin/date-picker": "file:../../../web-components/packages/date-picker"
+  }
+}

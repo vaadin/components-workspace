@@ -1,0 +1,9 @@
+{
+  "name": "@vaadin-flow-integration-tests/grid",
+  "private": true,
+  "version": "0.0.0",
+  "dependencies": {
+    "@vaadin/grid": "file:../../../web-components/packages/grid",
+    "@vaadin/tooltip": "file:../../../web-components/packages/tooltip"
+  }
+}

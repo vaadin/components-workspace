@@ -1,0 +1,8 @@
+{
+  "name": "@vaadin-flow-integration-tests/button",
+  "private": true,
+  "version": "0.0.0",
+  "dependencies": {
+    "@vaadin/button": "file:../../../web-components/packages/button"
+  }
+}

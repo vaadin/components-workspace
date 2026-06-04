@@ -1,0 +1,9 @@
+{
+  "name": "@vaadin-flow-integration-tests/combo-box",
+  "private": true,
+  "version": "0.0.0",
+  "dependencies": {
+    "@vaadin/combo-box": "file:../../../web-components/packages/combo-box",
+    "@vaadin/multi-select-combo-box": "file:../../../web-components/packages/multi-select-combo-box"
+  }
+}
