@@ -83,6 +83,19 @@ cd flow-components && mvn install
 
 See `docs/superpowers/specs/2026-06-04-common-gradle-build-design.md` for design details.
 
+### npm workspace for flow-components integration tests
+
+The workspace also exposes an npm workspace at the root that lets a pilot set of `flow-components` integration-test modules consume `@vaadin/*` packages directly from the local `web-components/` submodule. The Gradle `install` task creates the necessary symlinks and runs `npm install` automatically; no extra commands are needed.
+
+Pilot IT modules currently covered:
+
+- `vaadin-button-flow-integration-tests`
+- `vaadin-grid-flow-integration-tests`
+- `vaadin-combo-box-flow-integration-tests`
+- `vaadin-date-picker-flow-integration-tests`
+
+Local edits to `web-components/packages/*` source files take effect in those IT modules without a re-install. See `docs/superpowers/specs/2026-06-04-it-npm-workspace-design.md` for the design.
+
 ## Future Plans
 
 - Local npm linking between repos for integration testing

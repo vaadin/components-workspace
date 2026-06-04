@@ -60,6 +60,18 @@ Build files live at the workspace root (`build.gradle.kts`, `settings.gradle.kts
 
 flow-components currently requires Node ≤ 24 (Node 25 breaks `vaadin-charts-flow-svg-generator`'s mocha tests via a `localStorage` API change in jsdom).
 
+### Integration-test npm workspace
+
+The workspace root also acts as an npm workspace. A pilot set of `flow-components` integration-test modules (`vaadin-button-flow-integration-tests`, `vaadin-grid-flow-integration-tests`, `vaadin-combo-box-flow-integration-tests`, `vaadin-date-picker-flow-integration-tests`) consume `@vaadin/*` packages directly from `web-components/packages/*` via workspace symlinks. The per-IT-module `package.json` files live in `flow-components-overlay/` and are symlinked into the submodule by `scripts/sync-flow-overlays.sh` (wired into `./gradlew :flow-components:syncFlowOverlays`, run automatically by `./gradlew install`).
+
+To add a new IT module to the pilot:
+
+1. Append its path to `flow-components-overlay/overlays.txt`.
+2. Create the matching directory and `package.json` under `flow-components-overlay/`, listing the direct `@vaadin/*` deps from the module's Java `@NpmPackage` annotations as `file:` URLs into `web-components/packages/<name>`.
+3. Run `./gradlew install`.
+
+See `docs/superpowers/specs/2026-06-04-it-npm-workspace-design.md`.
+
 ## Cross-Repo Integration
 
 Local npm linking between `web-components` and `flow-components` is **not** set up. `flow-components` consumes `web-components` via the npm registry. To test unreleased `web-components` changes against `flow-components`, you must publish (or link manually) — this is listed as a future workspace concern in `docs/superpowers/specs/`.
