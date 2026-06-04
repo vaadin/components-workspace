@@ -1,0 +1,8 @@
+[submodule "web-components"]
+	path = web-components
+	url = https://github.com/vaadin/web-components.git
+	branch = main
+[submodule "flow-components"]
+	path = flow-components
+	url = https://github.com/vaadin/flow-components.git
+	branch = main
