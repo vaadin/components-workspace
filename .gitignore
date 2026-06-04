@@ -2,4 +2,4 @@
 .gradle/
 build/
 node_modules
-docs/demo-*.md
+docs/superpowers/demo-*.md
