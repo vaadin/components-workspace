@@ -2,7 +2,7 @@
 
 ## Overview
 
-A workspace-root Gradle build that orchestrates the existing `web-components` (pnpm) and `flow-components` (Maven) builds behind a single, uniform task surface. Gradle acts as a thin orchestrator: it does not compile, test, or package anything itself — every task delegates to the submodule's native tooling.
+A workspace-root Gradle build that orchestrates the existing `web-components` (Yarn) and `flow-components` (Maven) builds behind a single, uniform task surface. Gradle acts as a thin orchestrator: it does not compile, test, or package anything itself — every task delegates to the submodule's native tooling.
 
 ## Goals
 
@@ -12,7 +12,7 @@ A workspace-root Gradle build that orchestrates the existing `web-components` (p
 
 ## Non-Goals
 
-- Replacing pnpm or Maven in the submodules. Both remain authoritative; the submodules stay independently buildable from inside their own directories without Gradle.
+- Replacing Yarn or Maven in the submodules. Both remain authoritative; the submodules stay independently buildable from inside their own directories without Gradle.
 - Modifying files inside the submodules. The Gradle build lives entirely at the workspace root.
 - Cross-repo integration testing / local npm linking between the two submodules. Flow-components continues to consume web-components via the npm registry. Deferred to future work.
 - Native Gradle compilation, dependency wiring, or version catalogs.
@@ -25,7 +25,7 @@ A workspace-root Gradle build that orchestrates the existing `web-components` (p
 | Gradle version | 8.x (current stable), via Gradle Wrapper |
 | DSL | Kotlin DSL (`.gradle.kts`) |
 | Structure | Multi-project, two subprojects: `:web-components`, `:flow-components` |
-| pnpm invocation | `com.github.node-gradle.node` plugin v7.x with `download = false` |
+| Yarn invocation | `com.github.node-gradle.node` plugin v7.x with `download = false` |
 | Maven invocation | Plain `Exec` task shelling to `mvn` on `PATH` |
 
 ## File Layout
@@ -36,7 +36,7 @@ components-workspace/
 ├── build.gradle.kts                # root: aggregate tasks + node plugin application
 ├── gradle.properties               # parallel execution, toolchain hints
 ├── gradle/
-│   ├── web-components.gradle.kts   # pnpm install/build/test/clean tasks
+│   ├── web-components.gradle.kts   # yarn install/build/test/clean tasks
 │   └── flow-components.gradle.kts  # mvn install/build/test/clean tasks
 ├── gradle/wrapper/
 │   ├── gradle-wrapper.jar
@@ -68,7 +68,7 @@ project(":flow-components").apply {
 }
 ```
 
-`projectDir` points at the submodule directory so that pnpm/Maven run with the correct working directory. `buildFileName` is a path relative to `projectDir`, pointing back out to the `gradle/` directory at the workspace root so no Gradle files end up tracked inside the submodules.
+`projectDir` points at the submodule directory so that Yarn/Maven run with the correct working directory. `buildFileName` is a path relative to `projectDir`, pointing back out to the `gradle/` directory at the workspace root so no Gradle files end up tracked inside the submodules.
 
 ## Task Surface
 
@@ -78,21 +78,23 @@ User-facing entry points. Each depends on the same-named task in both subproject
 
 | Task | Behavior |
 |---|---|
-| `./gradlew install` | Runs `:web-components:install` (pnpm install) and `:flow-components:install`. |
+| `./gradlew install` | Runs `:web-components:install` (yarn install) and `:flow-components:install`. |
 | `./gradlew build` | Builds both. Each subproject's `build` depends on its own `install`. |
 | `./gradlew test` | Runs tests in both. Each subproject's `test` depends on its own `build`. |
 | `./gradlew clean` | Cleans both: removes `node_modules/` and `dist/` in web-components and Maven `target/` directories in flow-components. |
 
 ### `:web-components` tasks
 
-Uses the Node Gradle plugin's `PnpmTask` type. `download = false` so the system-installed Node and pnpm are used (already prerequisites per the workspace README).
+Uses the Node Gradle plugin's `YarnTask` type. `download = false` so the system-installed Node and Yarn are used (already prerequisites per the workspace README).
+
+Note: web-components has no `build` script in its `package.json` — its components are published as source (ESM, no bundling step). The `:build` task therefore has no action of its own and simply depends on `:install`. This preserves task-surface symmetry with `:flow-components` while reflecting the reality that "building" web-components locally is just installing it.
 
 | Task | Action |
 |---|---|
-| `install` | `pnpm install` |
-| `build` | `pnpm build` — depends on `install` |
-| `test` | `pnpm test` — depends on `build` |
-| `clean` | `Delete` `node_modules/` and `dist/` |
+| `install` | `yarn install` |
+| `build` | No-action task. Depends on `install`. |
+| `test` | `yarn test` (runs tests for changed packages only — the existing default for web-components). Depends on `build`. |
+| `clean` | `Delete` `node_modules/` |
 
 ### `:flow-components` tasks
 
@@ -125,7 +127,7 @@ project(":web-components") {
 }
 ```
 
-The plugin reads `package.json` and `pnpm-lock.yaml` from `nodeProjectDir`. `download = false` means the plugin will not provision Node/pnpm; the system installation is used.
+The plugin reads `package.json` and `yarn.lock` from `nodeProjectDir`. `download = false` means the plugin will not provision Node/Yarn; the system installation is used.
 
 ### Maven Exec helper
 
@@ -152,7 +154,7 @@ The two subprojects have no Gradle-level inter-dependency, so `build`, `test`, a
 
 ### Up-to-date checks
 
-- The pnpm `install` task declares `pnpm-lock.yaml` + `package.json` as inputs and `node_modules/` as output, so Gradle skips it when unchanged.
+- The yarn `install` task declares `yarn.lock` + `package.json` as inputs and `node_modules/` as output, so Gradle skips it when unchanged.
 - The Maven tasks declare no inputs/outputs and run every time. Maven's own incremental build behavior handles the inner work efficiently.
 
 ### JDK toolchain
@@ -161,7 +163,7 @@ Gradle does not compile any Java itself, so no `java { toolchain { ... } }` bloc
 
 ### Error propagation
 
-Both `Exec` and `PnpmTask` fail the Gradle build on non-zero exit. No additional wiring needed.
+Both `Exec` and `YarnTask` fail the Gradle build on non-zero exit. No additional wiring needed.
 
 ### No artifact wiring between subprojects
 
@@ -171,7 +173,7 @@ Both `Exec` and `PnpmTask` fail the Gradle build on non-zero exit. No additional
 
 - Open the workspace root in IntelliJ; the importer detects `settings.gradle.kts` and treats it as a Gradle project. Both subprojects appear as Gradle modules with their tasks in the Gradle tool window.
 - The existing `.idea/` directory is rewritten by IntelliJ on first Gradle import. Users with custom IDE setup may want to close the project and re-open it via "Open" → root → "Trust Project" so the Gradle importer runs cleanly.
-- IntelliJ's Gradle importer does not run pnpm or Maven during import — it only reads the Gradle model. The first `./gradlew install` (or `build`) must run from a terminal or the Gradle tool window to populate `node_modules/` and the Maven local repository.
+- IntelliJ's Gradle importer does not run Yarn or Maven during import — it only reads the Gradle model. The first `./gradlew install` (or `build`) must run from a terminal or the Gradle tool window to populate `node_modules/` and the Maven local repository.
 - The submodules' own IDE hints (existing in their trees) remain valid for users who prefer to open a single submodule directly. The workspace-level Gradle setup is additive.
 
 ## Workflows After This Spec
@@ -181,8 +183,8 @@ Both `Exec` and `PnpmTask` fail the Gradle build on non-zero exit. No additional
 ```bash
 git clone --recurse-submodules <workspace-url>
 cd components-workspace
-./gradlew install   # pnpm install + (mvn warm-up no-op)
-./gradlew build     # pnpm build + mvn -DskipTests install
+./gradlew install   # yarn install + (mvn warm-up no-op)
+./gradlew build     # (no-op for web-components) + mvn -DskipTests install
 ```
 
 ### Run all tests
@@ -204,7 +206,7 @@ cd components-workspace
 ./gradlew clean
 ```
 
-The existing direct workflows (`cd web-components && pnpm build`, `cd flow-components && mvn install`) continue to work and are unaffected.
+The existing direct workflows (`cd web-components && yarn install`, `cd flow-components && mvn install`) continue to work and are unaffected.
 
 ## .gitignore Additions
 
@@ -217,7 +219,7 @@ build/
 
 ## Future Work
 
-- **Local npm linking** between `:web-components` and `:flow-components` — would let flow-components consume an unreleased web-components build. Likely via a `:web-components:pack` task producing a tarball consumed via `pnpm overrides` or `pnpm link`.
+- **Local npm linking** between `:web-components` and `:flow-components` — would let flow-components consume an unreleased web-components build. Likely via a `:web-components:pack` task producing a tarball consumed via `yarn link` or a `resolutions` entry in flow-components' `package.json`.
 - **CI integration** — using these Gradle tasks as the entry point for CI pipelines.
 - **Subtree or monorepo migration** — orthogonal to this spec; carried forward from the workspace design spec.
 
@@ -226,7 +228,7 @@ build/
 1. Add Gradle Wrapper (`gradle wrapper --gradle-version 8.x`) at the workspace root.
 2. Create `settings.gradle.kts` with subproject wiring.
 3. Create root `build.gradle.kts` with Node plugin application and aggregate tasks.
-4. Create `gradle/web-components.gradle.kts` with pnpm tasks.
+4. Create `gradle/web-components.gradle.kts` with yarn tasks.
 5. Create `gradle/flow-components.gradle.kts` with Maven Exec tasks.
 6. Add `.gradle/` and `build/` to `.gitignore`.
 7. Verify `./gradlew install`, `./gradlew build`, `./gradlew test`, `./gradlew clean` all succeed end-to-end.
