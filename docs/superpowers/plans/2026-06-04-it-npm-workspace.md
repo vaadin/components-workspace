@@ -617,14 +617,14 @@ git commit -m "feat: add npmInstall Gradle task wired to root install"
 - [ ] **Step 1: Clean the workspace**
 
 ```bash
-rm -rf node_modules package-lock.json
+rm -rf node_modules
 rm -f flow-components/vaadin-button-flow-parent/vaadin-button-flow-integration-tests/package.json
 rm -f flow-components/vaadin-grid-flow-parent/vaadin-grid-flow-integration-tests/package.json
 rm -f flow-components/vaadin-combo-box-flow-parent/vaadin-combo-box-flow-integration-tests/package.json
 rm -f flow-components/vaadin-date-picker-flow-parent/vaadin-date-picker-flow-integration-tests/package.json
 ```
 
-This simulates a fresh post-clone state (lockfile and node_modules wiped; symlinks wiped). Do NOT commit anything — this is a verification setup.
+This simulates a fresh post-clone state (node_modules wiped; symlinks wiped). `package-lock.json` stays — in a real fresh clone, it's tracked and present, and the Node plugin's `NpmInstallTask` requires it as an input file. Do NOT commit anything — this is a verification setup.
 
 - [ ] **Step 2: Run the full install via Gradle**
 
