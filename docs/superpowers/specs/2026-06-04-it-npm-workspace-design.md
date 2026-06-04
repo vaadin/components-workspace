@@ -199,7 +199,7 @@ extensions.configure<com.github.gradle.node.NodeExtension> {
     yarnWorkDir.set(layout.buildDirectory.dir("yarn"))
 }
 
-val npmInstall = tasks.register<NpmTask>("npmInstall") {
+val npmInstall = tasks.named<NpmTask>("npmInstall") {
     description = "Installs all workspace npm dependencies."
     group = "build"
     args.set(listOf("install"))
