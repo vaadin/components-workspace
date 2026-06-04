@@ -558,6 +558,14 @@ val npmInstall = tasks.named<NpmTask>("npmInstall") {
     inputs.file("package-lock.json")
     outputs.dir("node_modules")
 }
+
+project(":web-components") {
+    afterEvaluate {
+        tasks.named("install") {
+            mustRunAfter(":npmInstall")
+        }
+    }
+}
 ```
 
 (c) Modify the existing aggregate `install` task to also depend on `npmInstall`. Find the existing block:

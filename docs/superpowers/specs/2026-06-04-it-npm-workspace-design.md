@@ -211,6 +211,14 @@ val npmInstall = tasks.named<NpmTask>("npmInstall") {
 tasks.named("install") {
     dependsOn(npmInstall)
 }
+
+project(":web-components") {
+    afterEvaluate {
+        tasks.named("install") {
+            mustRunAfter(":npmInstall")
+        }
+    }
+}
 ```
 
 After this change, `./gradlew install` runs:

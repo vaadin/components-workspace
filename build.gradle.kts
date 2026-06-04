@@ -41,6 +41,14 @@ tasks.register("install") {
     dependsOn(":web-components:install", ":flow-components:install", npmInstall)
 }
 
+project(":web-components") {
+    afterEvaluate {
+        tasks.named("install") {
+            mustRunAfter(":npmInstall")
+        }
+    }
+}
+
 tasks.named("build") {
     description = "Builds all subprojects."
     dependsOn(":web-components:build", ":flow-components:build")
