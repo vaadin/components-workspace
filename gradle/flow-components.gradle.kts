@@ -29,3 +29,14 @@ tasks.register<Exec>("clean") {
     workingDir = projectDir
     commandLine(mvnCommand, "clean")
 }
+
+val syncFlowOverlays = tasks.register<Exec>("syncFlowOverlays") {
+    description = "Materializes workspace-tracked flow-components overlay package.json files as symlinks inside the submodule."
+    group = "build"
+    workingDir = rootDir
+    commandLine("bash", "scripts/sync-flow-overlays.sh")
+}
+
+tasks.named("install") {
+    dependsOn(syncFlowOverlays)
+}
