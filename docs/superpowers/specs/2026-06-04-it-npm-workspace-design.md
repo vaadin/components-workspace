@@ -202,7 +202,6 @@ extensions.configure<com.github.gradle.node.NodeExtension> {
 val npmInstall = tasks.named<NpmTask>("npmInstall") {
     description = "Installs all workspace npm dependencies."
     group = "build"
-    args.set(listOf("install"))
     dependsOn(":flow-components:syncFlowOverlays")
     inputs.file("package.json")
     inputs.file("package-lock.json")
