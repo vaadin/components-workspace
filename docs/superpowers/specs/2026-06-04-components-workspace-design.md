@@ -31,6 +31,7 @@ Both repos use `main` as the default branch.
 ```
 components-workspace/
 ├── .git/
+├── .gitignore                  # Ignore IDE/editor metadata (e.g. .idea/)
 ├── .gitmodules
 ├── web-components/             # Submodule: vaadin/web-components
 ├── flow-components/            # Submodule: vaadin/flow-components
@@ -38,6 +39,14 @@ components-workspace/
 │   └── superpowers/
 │       └── specs/              # Design specs
 └── README.md                   # Workspace usage instructions
+```
+
+## .gitignore
+
+The workspace must include a `.gitignore` that excludes IDE/editor metadata so it does not pollute submodule-pointer commits. At minimum:
+
+```
+.idea/
 ```
 
 ## Submodule Configuration
