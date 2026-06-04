@@ -239,9 +239,11 @@ When `mvn install` runs in an IT module, Flow's plugin:
 3. Runs `npm install` (or `pnpm install` if `vaadin.pnpm.enable=true`).
 4. Bundles the frontend via Vite.
 
-The workspace approach is known-compatible (confirmed from prior Vaadin engineering experience):
+The workspace approach is known-compatible, confirmed from prior Vaadin engineering experience and verified during the pilot's Task 10:
 
-- **Flow's plugin writes `package.json` but does not replace `file:` paths it encounters.** Our hand-authored deps with `file:` URLs survive Flow's writes.
+- **Flow's plugin writes `package.json` but does not replace `file:` paths it encounters.** Our hand-authored `file:` deps survive Flow's writes — the `file:` URL we wrote for `@vaadin/button` stayed exactly as authored after a full `mvn install` run on the button IT module.
+- **The overlay `package.json` does get merged at build time.** Flow's plugin adds the rest of the deps the Java `@NpmPackage` annotations imply, plus `devDependencies` (vite, typescript, babel, etc.), a `vaadin` metadata block, and `overrides`. The symlink survives — Flow writes through it rather than replacing it.
+- **Merged content is expected to accumulate over time.** Periodically committing the merged overlay files back to the workspace repo keeps them as the canonical representation of what each IT module needs. Day-to-day rebuilds may show overlay files as locally modified; this is normal.
 - **`npm install` is mostly a no-op when the workspace is already set up.** npm detects the existing workspace and `node_modules/` tree, treating subsequent installs as deduplication passes.
 
 Flow plugin properties we set / verify during the pilot:
