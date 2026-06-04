@@ -81,7 +81,7 @@ User-facing entry points. Each depends on the same-named task in both subproject
 | `./gradlew install` | Runs `:web-components:install` (yarn install) and `:flow-components:install`. |
 | `./gradlew build` | Builds both. Each subproject's `build` depends on its own `install`. |
 | `./gradlew test` | Runs tests in both. Each subproject's `test` depends on its own `build`. |
-| `./gradlew clean` | Cleans both: removes `node_modules/` and `dist/` in web-components and Maven `target/` directories in flow-components. |
+| `./gradlew clean` | Cleans both: removes `node_modules/` in web-components and Maven `target/` directories in flow-components. |
 
 ### `:web-components` tasks
 
@@ -124,11 +124,14 @@ project(":web-components") {
     extensions.configure<com.github.gradle.node.NodeExtension> {
         download.set(false)
         nodeProjectDir.set(projectDir)
+        workDir.set(rootProject.layout.buildDirectory.dir("nodejs"))
+        npmWorkDir.set(rootProject.layout.buildDirectory.dir("npm"))
+        yarnWorkDir.set(rootProject.layout.buildDirectory.dir("yarn"))
     }
 }
 ```
 
-The plugin reads `package.json` and `yarn.lock` from `nodeProjectDir`. `download = false` means the plugin will not provision Node/Yarn; the system installation is used.
+The plugin reads `package.json` and `yarn.lock` from `nodeProjectDir`. `download = false` means the plugin will not provision Node for execution; the system Node + Yarn are used. The `workDir`/`npmWorkDir`/`yarnWorkDir` overrides relocate the plugin's bookkeeping directories from `nodeProjectDir/.gradle/` (inside the submodule) to `<workspace>/build/{nodejs,npm,yarn}`, which is already gitignored — this keeps the `web-components/` submodule's working tree clean.
 
 ### Maven Exec helper
 
@@ -160,7 +163,7 @@ The two subprojects have no Gradle-level inter-dependency, so `build`, `test`, a
 
 ### JDK toolchain
 
-Gradle does not compile any Java itself, so no `java { toolchain { ... } }` block is needed at the Gradle level. The Maven build inside `:flow-components` reads `JAVA_HOME` directly. The workspace prerequisite remains JDK 17+.
+Gradle does not compile any Java itself, so no `java { toolchain { ... } }` block is needed at the Gradle level. The Maven build inside `:flow-components` reads `JAVA_HOME` directly. The workspace prerequisite is JDK 21+ (matching `flow-components`' own requirement).
 
 ### Error propagation
 

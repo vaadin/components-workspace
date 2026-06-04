@@ -9,6 +9,9 @@ project(":web-components") {
     extensions.configure<com.github.gradle.node.NodeExtension> {
         download.set(false)
         nodeProjectDir.set(projectDir)
+        workDir.set(rootProject.layout.buildDirectory.dir("nodejs"))
+        npmWorkDir.set(rootProject.layout.buildDirectory.dir("npm"))
+        yarnWorkDir.set(rootProject.layout.buildDirectory.dir("yarn"))
     }
 }
 
