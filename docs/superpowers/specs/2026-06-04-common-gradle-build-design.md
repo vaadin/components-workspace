@@ -119,6 +119,7 @@ plugins {
 }
 
 project(":web-components") {
+    apply(plugin = "base")
     apply(plugin = "com.github.node-gradle.node")
     extensions.configure<com.github.gradle.node.NodeExtension> {
         download.set(false)

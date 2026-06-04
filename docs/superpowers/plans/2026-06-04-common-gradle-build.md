@@ -180,7 +180,7 @@ plugins {
     id("com.github.node-gradle.node") version "7.1.0" apply false
 }
 
-configure(project(":web-components")) {
+project(":web-components") {
     apply(plugin = "base")
     apply(plugin = "com.github.node-gradle.node")
     extensions.configure<com.github.gradle.node.NodeExtension> {
@@ -359,7 +359,7 @@ git commit -m "feat: add install/build/test/clean tasks for :flow-components"
 
 - [ ] **Step 1: Append aggregate task wiring**
 
-Append to `build.gradle.kts` (after the existing `configure(project(":web-components"))` block):
+Append to `build.gradle.kts` (after the existing `project(":web-components")` block):
 
 ```kotlin
 tasks.register("install") {
