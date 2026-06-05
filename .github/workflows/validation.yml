@@ -154,7 +154,42 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - run: echo "wtr placeholder"
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Restore install cache
+        uses: actions/cache/restore@v5
+        with:
+          key: ${{ needs.install.outputs.cache-key }}
+          path: |
+            ~/.m2/repository/com/vaadin
+            node_modules
+            web-components/node_modules
+            web-components/.yarn
+            flow-components/vaadin-charts-flow-parent/vaadin-charts-flow-svg-generator/src/main/resources/META-INF/frontend/generated
+          fail-on-cache-miss: true
+
+      - name: Sync overlay symlinks
+        run: bash scripts/sync-flow-overlays.sh
+
+      - name: Run WTR tests
+        run: cd flow-components && node scripts/wtr.js
+
+      - name: Upload WTR reports
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: wtr-reports
+          path: flow-components/**/wtr-results.xml
+          retention-days: 1
+          if-no-files-found: ignore
 
   package-war:
     name: Package WAR
