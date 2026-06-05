@@ -296,7 +296,93 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJson(needs.install.outputs.it-matrix) }}
     steps:
-      - run: echo "its placeholder shard=${{ matrix.shard }}"
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Setup JDK 21
+        uses: actions/setup-java@v5
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: Restore install cache
+        uses: actions/cache/restore@v5
+        with:
+          key: ${{ needs.install.outputs.cache-key }}
+          path: |
+            ~/.m2/repository/com/vaadin
+            node_modules
+            web-components/node_modules
+            web-components/.yarn
+            flow-components/vaadin-charts-flow-parent/vaadin-charts-flow-svg-generator/src/main/resources/META-INF/frontend/generated
+          fail-on-cache-miss: true
+
+      - name: Restore WAR cache
+        uses: actions/cache/restore@v5
+        with:
+          key: ${{ needs.package-war.outputs.war-cache-key }}
+          path: |
+            flow-components/integration-tests/pom.xml
+            flow-components/integration-tests/target
+          fail-on-cache-miss: true
+
+      - name: Sync overlay symlinks
+        run: bash scripts/sync-flow-overlays.sh
+
+      - name: Install TestBench license
+        if: env.TB_LICENSE != ''
+        env:
+          TB_LICENSE: ${{ secrets.TB_LICENSE }}
+        run: |
+          mkdir -p ~/.vaadin
+          user="${TB_LICENSE%%/*}"
+          key="${TB_LICENSE#*/}"
+          echo "{\"username\":\"${user}\",\"proKey\":\"${key}\"}" > ~/.vaadin/proKey
+
+      - name: Compute artifact shard id
+        id: shardid
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          value="${SHARD//\//-}"
+          echo "value=$value" >> "$GITHUB_OUTPUT"
+
+      - name: Run IT shard
+        env:
+          SHARD_TESTS: ${{ matrix.tests }}
+        run: |
+          cd flow-components && mvn -pl integration-tests -Drun-it \
+            jetty:start-war failsafe:integration-test jetty:stop failsafe:verify \
+            -Dvaadin.productionMode \
+            -DskipFrontend \
+            -Dfailsafe.forkCount=4 \
+            -Dcom.vaadin.testbench.Parameters.testsInParallel=2 \
+            -Dfailsafe.rerunFailingTestsCount=2 \
+            -Dmaven.test.redirectTestOutputToFile=true \
+            -Dtest.reuseDriver=true \
+            -Dit.test="$SHARD_TESTS" \
+            -B -ntp
+
+      - name: Upload failsafe reports
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: failsafe-reports-${{ steps.shardid.outputs.value }}
+          path: flow-components/integration-tests/target/failsafe-reports/TEST-*.xml
+          retention-days: 1
+          if-no-files-found: ignore
+
+      - name: Upload error screenshots
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: error-screenshots-${{ steps.shardid.outputs.value }}
+          path: flow-components/integration-tests/error-screenshots/
+          retention-days: 5
+          if-no-files-found: ignore
 
   results:
     name: Collect results
