@@ -6,7 +6,8 @@
 #
 # Reads flow-components-overlay/overlays.txt by default; first positional
 # argument overrides the source. Entries starting with # and blank lines are
-# ignored.
+# ignored. Lines that don't match the vaadin-*-flow-integration-tests pattern
+# are dropped.
 
 set -euo pipefail
 
@@ -18,21 +19,25 @@ if [ ! -f "$SOURCE" ]; then
   exit 1
 fi
 
-all_names=$(grep -vE '^[[:space:]]*(#|$)' "$SOURCE" \
-  | sed 's,.*vaadin-\(.*\)-flow-integration-tests$,\1,')
+all_names=$(tr -d '\r' < "$SOURCE" \
+  | grep -vE '^[[:space:]]*(#|$)' \
+  | sed -n 's,.*vaadin-\([^/]*\)-flow-integration-tests$,\1,p' \
+  || true)
 
 if [ -z "$COMPONENTS" ]; then
-  echo $all_names
+  printf '%s' "$all_names" | tr '\n' ' ' | sed 's/[[:space:]]*$//'
+  echo
   exit 0
 fi
 
 out=""
-for n in $all_names; do
+while IFS= read -r n; do
+  [ -z "$n" ] && continue
   for want in $COMPONENTS; do
     if [ "$n" = "$want" ]; then
       out="$out $n"
       break
     fi
   done
-done
-echo ${out# }
+done <<< "$all_names"
+echo "${out# }"
