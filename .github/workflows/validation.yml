@@ -1,0 +1,92 @@
+name: Validation
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      components:
+        description: 'Space-separated names (e.g. "grid combo-box"), empty = all overlay modules'
+        required: false
+        default: ''
+      debug:
+        description: 'Verbose Maven output (drop -q)'
+        type: boolean
+        default: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    name: Install
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      cache-key: ${{ steps.skeleton.outputs.cache-key }}
+      it-matrix: ${{ steps.skeleton.outputs.it-matrix }}
+    steps:
+      - name: Placeholder
+        id: skeleton
+        run: |
+          echo "install placeholder"
+          echo "cache-key=placeholder" >> "$GITHUB_OUTPUT"
+          echo 'it-matrix={"include":[]}' >> "$GITHUB_OUTPUT"
+
+  unit:
+    name: Unit Tests
+    needs: install
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - run: echo "unit placeholder"
+
+  wtr:
+    name: WTR Tests
+    needs: install
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - run: echo "wtr placeholder"
+
+  package-war:
+    name: Package WAR
+    needs: install
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      war-cache-key: ${{ steps.skeleton.outputs.war-cache-key }}
+    steps:
+      - name: Placeholder
+        id: skeleton
+        run: |
+          echo "package-war placeholder"
+          echo "war-cache-key=placeholder" >> "$GITHUB_OUTPUT"
+
+  its:
+    name: IT ${{ matrix.shard }}
+    needs: [install, package-war]
+    if: needs.install.outputs.it-matrix != '' && fromJson(needs.install.outputs.it-matrix).include[0] != null
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.install.outputs.it-matrix) }}
+    steps:
+      - run: echo "its placeholder shard=${{ matrix.shard }}"
+
+  results:
+    name: Collect results
+    needs: [install, unit, wtr, package-war, its]
+    if: always() && needs.install.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+      actions: write
+    steps:
+      - run: echo "results placeholder"
