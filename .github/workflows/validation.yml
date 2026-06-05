@@ -27,15 +27,78 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     outputs:
-      cache-key: ${{ steps.skeleton.outputs.cache-key }}
-      it-matrix: ${{ steps.skeleton.outputs.it-matrix }}
+      cache-key: ${{ steps.key.outputs.value }}
+      it-matrix: ${{ steps.matrix.outputs.value }}
     steps:
-      - name: Placeholder
-        id: skeleton
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Setup JDK 21
+        uses: actions/setup-java@v5
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Compute cache key
+        id: key
+        env:
+          KEY: ${{ runner.os }}-workspace-install-${{ hashFiles('package.json', 'package-lock.json', 'flow-components-overlay/**', 'web-components/yarn.lock', 'gradle/**', 'build.gradle.kts', 'settings.gradle.kts') }}-${{ github.sha }}
+        run: echo "value=$KEY" >> "$GITHUB_OUTPUT"
+
+      - name: Restore install cache (skip work if hit)
+        id: cache
+        uses: actions/cache/restore@v5
+        with:
+          key: ${{ steps.key.outputs.value }}
+          path: |
+            ~/.m2/repository/com/vaadin
+            node_modules
+            web-components/node_modules
+            web-components/.yarn
+            flow-components/vaadin-charts-flow-parent/vaadin-charts-flow-svg-generator/src/main/resources/META-INF/frontend/generated
+
+      - name: Workspace install
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: ./gradlew install --no-daemon
+
+      - name: Save install cache
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          key: ${{ steps.key.outputs.value }}
+          path: |
+            ~/.m2/repository/com/vaadin
+            node_modules
+            web-components/node_modules
+            web-components/.yarn
+            flow-components/vaadin-charts-flow-parent/vaadin-charts-flow-svg-generator/src/main/resources/META-INF/frontend/generated
+
+      - name: Merge overlay ITs into integration-tests/
+        env:
+          COMPONENTS: ${{ inputs.components }}
         run: |
-          echo "install placeholder"
-          echo "cache-key=placeholder" >> "$GITHUB_OUTPUT"
-          echo 'it-matrix={"include":[]}' >> "$GITHUB_OUTPUT"
+          names=$(COMPONENTS="$COMPONENTS" bash scripts/overlay-component-names.sh)
+          echo "Merging ITs for: $names"
+          cd flow-components && node scripts/mergeITs.js $names
+
+      - name: Compute IT matrix
+        id: matrix
+        run: |
+          matrix=$(bash scripts/compute-it-matrix.sh)
+          echo "$matrix" | jq .
+          {
+            echo 'value<<EOF'
+            echo "$matrix"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
 
   unit:
     name: Unit Tests
