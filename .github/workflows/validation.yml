@@ -149,6 +149,8 @@ jobs:
     needs: install
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      TB_LICENSE: ${{ secrets.TB_LICENSE }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -181,6 +183,14 @@ jobs:
 
       - name: Sync overlay symlinks
         run: bash scripts/sync-flow-overlays.sh
+
+      - name: Install TestBench license
+        if: env.TB_LICENSE != ''
+        run: |
+          mkdir -p ~/.vaadin
+          user="${TB_LICENSE%%/*}"
+          key="${TB_LICENSE#*/}"
+          echo "{\"username\":\"${user}\",\"proKey\":\"${key}\"}" > ~/.vaadin/proKey
 
       - name: Run WTR tests
         run: cd flow-components && node scripts/wtr.js
