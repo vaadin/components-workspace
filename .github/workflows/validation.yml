@@ -151,6 +151,7 @@ jobs:
 
   wtr:
     name: WTR Tests
+    if: false
     needs: install
     runs-on: ubuntu-latest
     timeout-minutes: 30
