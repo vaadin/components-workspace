@@ -197,13 +197,94 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     outputs:
-      war-cache-key: ${{ steps.skeleton.outputs.war-cache-key }}
+      war-cache-key: ${{ steps.warkey.outputs.value }}
     steps:
-      - name: Placeholder
-        id: skeleton
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Setup JDK 21
+        uses: actions/setup-java@v5
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Restore install cache
+        uses: actions/cache/restore@v5
+        with:
+          key: ${{ needs.install.outputs.cache-key }}
+          path: |
+            ~/.m2/repository/com/vaadin
+            node_modules
+            web-components/node_modules
+            web-components/.yarn
+            flow-components/vaadin-charts-flow-parent/vaadin-charts-flow-svg-generator/src/main/resources/META-INF/frontend/generated
+          fail-on-cache-miss: true
+
+      - name: Sync overlay symlinks
+        run: bash scripts/sync-flow-overlays.sh
+
+      - name: Install TestBench license
+        if: env.TB_LICENSE != ''
+        env:
+          TB_LICENSE: ${{ secrets.TB_LICENSE }}
         run: |
-          echo "package-war placeholder"
-          echo "war-cache-key=placeholder" >> "$GITHUB_OUTPUT"
+          mkdir -p ~/.vaadin
+          user="${TB_LICENSE%%/*}"
+          key="${TB_LICENSE#*/}"
+          echo "{\"username\":\"${user}\",\"proKey\":\"${key}\"}" > ~/.vaadin/proKey
+
+      - name: Merge overlay ITs into integration-tests/
+        env:
+          COMPONENTS: ${{ inputs.components }}
+        run: |
+          names=$(COMPONENTS="$COMPONENTS" bash scripts/overlay-component-names.sh)
+          cd flow-components && node scripts/mergeITs.js $names
+
+      - name: Compute WAR cache key
+        id: warkey
+        env:
+          KEY: ${{ runner.os }}-war-${{ hashFiles('flow-components/**/pom.xml', 'flow-components/integration-tests/src/test/java/**') }}-${{ github.sha }}
+        run: echo "value=$KEY" >> "$GITHUB_OUTPUT"
+
+      - name: Restore WAR cache
+        id: warcache
+        uses: actions/cache/restore@v5
+        with:
+          key: ${{ steps.warkey.outputs.value }}
+          path: |
+            flow-components/integration-tests/pom.xml
+            flow-components/integration-tests/target
+
+      - name: Package integration-tests WAR
+        if: steps.warcache.outputs.cache-hit != 'true'
+        run: |
+          cd flow-components && mvn package -pl integration-tests \
+            -Dvaadin.pnpm.enable -Drun-it -Drelease \
+            -Dvaadin.productionMode -Dvaadin.force.production.build=true \
+            -Dmaven.test.skip=true -DskipJetty -B -ntp
+
+      - name: Compile IT test sources
+        if: steps.warcache.outputs.cache-hit != 'true'
+        run: |
+          cd flow-components && mvn test-compile -pl integration-tests \
+            -Drun-it -DskipFrontend -DskipJetty -DskipUnitTests -B -ntp
+
+      - name: Save WAR cache
+        if: steps.warcache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          key: ${{ steps.warkey.outputs.value }}
+          path: |
+            flow-components/integration-tests/pom.xml
+            flow-components/integration-tests/target
 
   its:
     name: IT ${{ matrix.shard }}
