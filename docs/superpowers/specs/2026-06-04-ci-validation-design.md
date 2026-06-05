@@ -179,10 +179,16 @@ install:
           web-components/.yarn
           flow-components/vaadin-charts-flow-parent/vaadin-charts-flow-svg-generator/src/main/resources/META-INF/frontend/generated
 
-    - name: Compute IT matrix
-      id: matrix
+    - name: Merge overlay ITs into integration-tests/
       env:
         COMPONENTS: ${{ inputs.components }}
+      run: |
+        names=$(COMPONENTS="$COMPONENTS" bash scripts/overlay-component-names.sh)
+        echo "Merging ITs for: $names"
+        cd flow-components && node scripts/mergeITs.js $names
+
+    - name: Compute IT matrix
+      id: matrix
       run: |
         matrix=$(bash scripts/compute-it-matrix.sh)
         echo "$matrix" | jq .
@@ -201,6 +207,8 @@ install:
 4. `:flow-components:install` — `mvn -DskipTests install` (full reactor).
 
 The Gradle layer is what ties these together — the workflow does not re-invent the ordering.
+
+After install, the job runs `flow-components/scripts/mergeITs.js` with the overlay component names so that only overlay modules' ITs end up in `flow-components/integration-tests/`. The matrix script then walks the merged tree.
 
 ## Fast-Check Branches
 
@@ -298,26 +306,25 @@ The packaged WAR is the input every IT shard restores. Keyed off pom.xml + IT ja
 
 ## IT Shards
 
-Matrix is computed in the install job via `scripts/compute-it-matrix.sh`. The script reads `flow-components-overlay/overlays.txt`, optionally filters by `COMPONENTS`, counts IT classes per module, and packs into ≤12 buckets using a longest-job-first greedy heuristic.
+The IT job uses the merged-WAR pattern from `flow-components/validation.yml`: a single `integration-tests/` parent module (built by `mergeITs.js` over the overlay component list) packages the WAR once, and every shard runs `mvn -pl integration-tests jetty:start-war failsafe:integration-test ...` with a `-Dit.test=` filter naming the IT classes assigned to that shard.
 
-### `scripts/compute-it-matrix.sh`
+Two scripts feed the matrix:
+
+### `scripts/overlay-component-names.sh`
+
+Maps `flow-components-overlay/overlays.txt` entries to the short component names `mergeITs.js` expects. Optional `COMPONENTS` env filter narrows the set.
 
 ```bash
 #!/usr/bin/env bash
-# Reads flow-components-overlay/overlays.txt and emits a GH Actions matrix
-# JSON to stdout. Packs the overlay list into at most MAX_SHARDS buckets;
-# heaviest module first into the currently-smallest bucket gives roughly
-# balanced wall-clock per shard.
+# Emits a space-separated list of overlay short component names to stdout.
 #
 # Env overrides:
-#   MAX_SHARDS  — default 12
 #   COMPONENTS  — space-separated short names to keep (e.g. "grid date-picker")
 #
-# The flow-components/ submodule must be checked out so IT class counts can
-# be read from src/test/java.
+# The source overlay list is flow-components-overlay/overlays.txt; entries
+# starting with # and blank lines are ignored.
 set -euo pipefail
 
-MAX_SHARDS="${MAX_SHARDS:-12}"
 COMPONENTS="${COMPONENTS:-}"
 SOURCE="${1:-flow-components-overlay/overlays.txt}"
 
@@ -326,53 +333,85 @@ if [ ! -f "$SOURCE" ]; then
   exit 1
 fi
 
-mapfile -t paths < <(grep -vE '^[[:space:]]*(#|$)' "$SOURCE")
+all_names=$(grep -vE '^[[:space:]]*(#|$)' "$SOURCE" \
+  | sed 's,.*vaadin-\(.*\)-flow-integration-tests$,\1,')
 
-if [ -n "$COMPONENTS" ]; then
-  filtered=()
-  for p in "${paths[@]}"; do
-    name=$(basename "$p" | sed 's/^vaadin-//; s/-flow-integration-tests$//')
-    for want in $COMPONENTS; do
-      [ "$name" = "$want" ] && filtered+=("$p") && break
-    done
-  done
-  paths=("${filtered[@]}")
+if [ -z "$COMPONENTS" ]; then
+  echo "$all_names" | tr '\n' ' '
+  exit 0
 fi
 
-count=${#paths[@]}
-[ "$count" -eq 0 ] && { echo '{"include":[]}'; exit 0; }
-
-n=$count
-[ "$n" -gt "$MAX_SHARDS" ] && n=$MAX_SHARDS
-
-declare -a annotated
-for p in "${paths[@]}"; do
-  c=$(find "flow-components/$p/src/test/java" -name '*IT.java' 2>/dev/null | wc -l | tr -d ' ')
-  annotated+=("${c:-0}|$p")
-done
-mapfile -t annotated < <(printf '%s\n' "${annotated[@]}" | sort -t'|' -k1,1nr)
-
-declare -a paths_bkt names_bkt load
-for ((i=0; i<n; i++)); do paths_bkt[$i]=""; names_bkt[$i]=""; load[$i]=0; done
-
-for entry in "${annotated[@]}"; do
-  c="${entry%%|*}"
-  p="${entry#*|}"
-  name=$(basename "$p" | sed 's/^vaadin-//; s/-flow-integration-tests$//')
-  min=0
-  for ((i=1; i<n; i++)); do
-    [ "${load[$i]}" -lt "${load[$min]}" ] && min=$i
+# Intersect: keep only names that appear in COMPONENTS.
+out=""
+for n in $all_names; do
+  for want in $COMPONENTS; do
+    if [ "$n" = "$want" ]; then
+      out="$out $n"
+      break
+    fi
   done
-  [ -n "${paths_bkt[$min]}" ] && { paths_bkt[$min]+=";"; names_bkt[$min]+=","; }
-  paths_bkt[$min]+="$p"
-  names_bkt[$min]+="$name"
-  load[$min]=$((load[$min] + c))
+done
+echo "${out# }"
+```
+
+### `scripts/compute-it-matrix.sh`
+
+After `mergeITs.js` runs, all overlay-module IT sources live under `flow-components/integration-tests/src/test/java/`. The matrix script walks that tree, derives fully-qualified class names, and round-robin distributes them into ≤12 buckets — same algorithm as flow-components, just with a hard cap.
+
+```bash
+#!/usr/bin/env bash
+# Reads flow-components/integration-tests/src/test/java/ for IT classes (the
+# output of mergeITs.js with overlay component names) and emits a GH Actions
+# matrix JSON to stdout. Round-robin distributes IT classes across at most
+# MAX_SHARDS buckets.
+#
+# Env overrides:
+#   MAX_SHARDS        — default 12 (hard cap on parallel shards)
+#   TARGET_PER_SHARD  — default 35 (aim for this many classes per shard until
+#                       capped by MAX_SHARDS)
+#
+# This script assumes mergeITs.js has already been run.
+set -euo pipefail
+
+MAX_SHARDS="${MAX_SHARDS:-12}"
+TARGET_PER_SHARD="${TARGET_PER_SHARD:-35}"
+ROOT="${1:-flow-components/integration-tests/src/test/java}"
+
+if [ ! -d "$ROOT" ]; then
+  echo "::error::Merged integration-tests source tree not found at $ROOT (did mergeITs.js run?)" >&2
+  exit 1
+fi
+
+mapfile -t its < <(
+  find "$ROOT" -name '*IT.java' -printf '%P\n' \
+    | sed -e 's|/|.|g' -e 's|\.java$||' \
+    | sort
+)
+count=${#its[@]}
+if [ "$count" -eq 0 ]; then
+  echo '{"include":[]}'
+  exit 0
+fi
+
+n=$(( (count + TARGET_PER_SHARD - 1) / TARGET_PER_SHARD ))
+[ "$n" -lt 1 ] && n=1
+[ "$n" -gt "$MAX_SHARDS" ] && n=$MAX_SHARDS
+[ "$n" -gt "$count" ] && n=$count
+
+declare -a buckets
+for ((i=1; i<=n; i++)); do buckets[$i]=""; done
+i=1
+for t in "${its[@]}"; do
+  [ -n "${buckets[$i]}" ] && buckets[$i]+=","
+  buckets[$i]+="$t"
+  i=$((i+1))
+  [ $i -gt $n ] && i=1
 done
 
 json='{"include":['
-for ((k=0; k<n; k++)); do
-  [ $k -gt 0 ] && json+=','
-  json+='{"shard":"'$((k+1))'/'$n'","names":"'${names_bkt[$k]}'","paths":"'${paths_bkt[$k]}'","weight":"'${load[$k]}'"}'
+for ((k=1; k<=n; k++)); do
+  [ $k -gt 1 ] && json+=','
+  json+='{"shard":"'$k'/'$n'","tests":"'${buckets[$k]}'"}'
 done
 json+=']}'
 echo "$json"
@@ -382,7 +421,7 @@ echo "$json"
 
 ```yaml
 its:
-  name: IT ${{ matrix.shard }} (${{ matrix.names }})
+  name: IT ${{ matrix.shard }}
   needs: [install, package-war]
   if: needs.install.outputs.it-matrix != '' && fromJson(needs.install.outputs.it-matrix).include[0] != null
   runs-on: ubuntu-latest
@@ -399,34 +438,25 @@ its:
     - install TestBench license
     - name: Run shard
       env:
-        PATHS: ${{ matrix.paths }}
+        SHARD_TESTS: ${{ matrix.tests }}
       run: |
-        IFS=';' read -ra MODULES <<< "$PATHS"
-        failed=()
-        for p in "${MODULES[@]}"; do
-          echo "::group::Module $p"
-          if ! ( cd "flow-components/$p" && mvn \
-              jetty:start-war failsafe:integration-test jetty:stop failsafe:verify \
-              -Drun-it -Dvaadin.productionMode -DskipFrontend \
-              -Dfailsafe.forkCount=4 \
-              -Dcom.vaadin.testbench.Parameters.testsInParallel=2 \
-              -Dfailsafe.rerunFailingTestsCount=2 \
-              -Dtest.reuseDriver=true \
-              -B -ntp ); then
-            failed+=("$(basename "$p")")
-          fi
-          echo "::endgroup::"
-        done
-        if [ ${#failed[@]} -gt 0 ]; then
-          echo "::error::Failed modules in this shard: ${failed[*]}"
-          exit 1
-        fi
+        cd flow-components && mvn -pl integration-tests -Drun-it \
+          jetty:start-war failsafe:integration-test jetty:stop failsafe:verify \
+          -Dvaadin.productionMode \
+          -DskipFrontend \
+          -Dfailsafe.forkCount=4 \
+          -Dcom.vaadin.testbench.Parameters.testsInParallel=2 \
+          -Dfailsafe.rerunFailingTestsCount=2 \
+          -Dmaven.test.redirectTestOutputToFile=true \
+          -Dtest.reuseDriver=true \
+          -Dit.test="$SHARD_TESTS" \
+          -B -ntp
     - name: Upload failsafe reports
       if: always()
       uses: actions/upload-artifact@v6
       with:
         name: failsafe-reports-${{ matrix.shard }}
-        path: flow-components/**/target/failsafe-reports/TEST-*.xml
+        path: flow-components/integration-tests/target/failsafe-reports/TEST-*.xml
         retention-days: 1
         if-no-files-found: ignore
     - name: Upload error screenshots
@@ -434,21 +464,23 @@ its:
       uses: actions/upload-artifact@v6
       with:
         name: error-screenshots-${{ matrix.shard }}
-        path: flow-components/**/error-screenshots/
+        path: flow-components/integration-tests/error-screenshots/
         retention-days: 5
         if-no-files-found: ignore
 ```
 
+The `/` in `matrix.shard` (e.g. `3/12`) is converted to a hyphen for artifact names by replacing `/` with `-` inline via `${{ matrix.shard }}`-safe expressions if GH artifact names reject slashes; the spec assumes the runtime accepts `3/12` (as flow-components/validation.yml does today). If this proves not to be the case, use `matrix.shardId` (an integer-only field added to the matrix entry alongside `shard`).
+
 ### Shard sizing
 
-| Overlays.txt size | Shards | Modules per shard |
+| Overlay IT classes | Shards (n) | Classes per shard |
 |---|---|---|
-| 4 (today) | 4 | 1 |
-| 12 | 12 | 1 |
-| 26 | 12 | ~2 |
-| 52 (full rollout) | 12 | ~4–5 (largest first) |
+| ≤35 | 1 | up to 35 |
+| 36–70 | 2 | ≈35 |
+| 36–420 | `ceil(count/35)` | ≈35 |
+| 420+ | 12 (capped) | ≥35 |
 
-The 90-minute timeout accommodates 4–5 modules per shard at the upper end. If a single module's ITs ever exceed 90 minutes alone, the longest-job-first heuristic already places it in its own shard.
+`TARGET_PER_SHARD=35` matches flow-components/validation.yml. The `MAX_SHARDS=12` cap kicks in around 420 IT classes — well past the full-rollout total expected for the overlay set. The 90-minute job timeout accommodates ~35 IT classes at roughly 2 minutes each plus jetty boot and failure reruns.
 
 ## Results Job
 
