@@ -114,6 +114,11 @@ jobs:
           distribution: 'temurin'
           cache: 'maven'
 
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
       - name: Restore install cache
         uses: actions/cache/restore@v5
         with:
@@ -133,7 +138,7 @@ jobs:
         run: |
           cd flow-components && mvn test -Drelease -T 4 \
             -Dsurefire.parallel=classes -Dsurefire.threadCount=2 \
-            -DskipSvgChartsBuild -B -ntp
+            -B -ntp
 
       - name: Upload unit test reports
         if: always()
