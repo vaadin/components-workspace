@@ -9,10 +9,6 @@ on:
         description: 'Space-separated names (e.g. "grid combo-box"), empty = all overlay modules'
         required: false
         default: ''
-      debug:
-        description: 'Verbose Maven output (drop -q)'
-        type: boolean
-        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -196,6 +192,8 @@ jobs:
     needs: install
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      TB_LICENSE: ${{ secrets.TB_LICENSE }}
     outputs:
       war-cache-key: ${{ steps.warkey.outputs.value }}
     steps:
@@ -233,8 +231,6 @@ jobs:
 
       - name: Install TestBench license
         if: env.TB_LICENSE != ''
-        env:
-          TB_LICENSE: ${{ secrets.TB_LICENSE }}
         run: |
           mkdir -p ~/.vaadin
           user="${TB_LICENSE%%/*}"
@@ -292,6 +288,8 @@ jobs:
     if: needs.install.outputs.it-matrix != '' && fromJson(needs.install.outputs.it-matrix).include[0] != null
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    env:
+      TB_LICENSE: ${{ secrets.TB_LICENSE }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.install.outputs.it-matrix) }}
@@ -334,8 +332,6 @@ jobs:
 
       - name: Install TestBench license
         if: env.TB_LICENSE != ''
-        env:
-          TB_LICENSE: ${{ secrets.TB_LICENSE }}
         run: |
           mkdir -p ~/.vaadin
           user="${TB_LICENSE%%/*}"
