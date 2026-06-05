@@ -43,4 +43,12 @@ if bash "$SCRIPT" /tmp/this-does-not-exist >/dev/null 2>&1; then
 fi
 pass "missing source exits non-zero"
 
+# Case 5: CRLF line endings — names still extracted cleanly (no \r artifacts).
+CRLF_FIXTURE=$(mktemp)
+printf 'vaadin-button-flow-parent/vaadin-button-flow-integration-tests\r\nvaadin-grid-flow-parent/vaadin-grid-flow-integration-tests\r\n' > "$CRLF_FIXTURE"
+out=$(bash "$SCRIPT" "$CRLF_FIXTURE")
+rm -f "$CRLF_FIXTURE"
+[ "$out" = "button grid" ] || fail "CRLF: got [$out]"
+pass "CRLF line endings stripped before parsing"
+
 echo "All tests pass."

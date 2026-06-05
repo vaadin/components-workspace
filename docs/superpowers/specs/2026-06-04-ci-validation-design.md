@@ -33,17 +33,13 @@ on:
         description: 'Space-separated names (e.g. "grid combo-box"), empty = all overlay modules'
         required: false
         default: ''
-      debug:
-        description: 'Verbose Maven output (drop -q)'
-        type: boolean
-        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 ```
 
-`pull_request` and `workflow_dispatch` only. No nightly or merge-queue trigger. The `components` input filters the IT matrix; the `debug` input controls Maven verbosity.
+`pull_request` and `workflow_dispatch` only. No nightly or merge-queue trigger. The `components` input filters the IT matrix.
 
 ## Pipeline Shape
 
@@ -460,6 +456,13 @@ its:
     - cache restore (WAR cache from package-war, fail-on-cache-miss: true)
     - sync overlay symlinks
     - install TestBench license
+    - name: Compute artifact shard id
+      id: shardid
+      env:
+        SHARD: ${{ matrix.shard }}
+      run: |
+        value="${SHARD//\//-}"
+        echo "value=$value" >> "$GITHUB_OUTPUT"
     - name: Run shard
       env:
         SHARD_TESTS: ${{ matrix.tests }}
@@ -479,7 +482,7 @@ its:
       if: always()
       uses: actions/upload-artifact@v6
       with:
-        name: failsafe-reports-${{ matrix.shard }}
+        name: failsafe-reports-${{ steps.shardid.outputs.value }}
         path: flow-components/integration-tests/target/failsafe-reports/TEST-*.xml
         retention-days: 1
         if-no-files-found: ignore
@@ -487,13 +490,13 @@ its:
       if: failure()
       uses: actions/upload-artifact@v6
       with:
-        name: error-screenshots-${{ matrix.shard }}
+        name: error-screenshots-${{ steps.shardid.outputs.value }}
         path: flow-components/integration-tests/error-screenshots/
         retention-days: 5
         if-no-files-found: ignore
 ```
 
-The `/` in `matrix.shard` (e.g. `3/12`) is converted to a hyphen for artifact names by replacing `/` with `-` inline via `${{ matrix.shard }}`-safe expressions if GH artifact names reject slashes; the spec assumes the runtime accepts `3/12` (as flow-components/validation.yml does today). If this proves not to be the case, use `matrix.shardId` (an integer-only field added to the matrix entry alongside `shard`).
+GitHub Actions rejects `/` in artifact names. The `Compute artifact shard id` step rewrites `3/12` to `3-12` via bash parameter expansion (`${SHARD//\//-}`) so the artifact uploads succeed.
 
 ### Shard sizing
 
