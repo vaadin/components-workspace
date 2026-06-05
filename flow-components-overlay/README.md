@@ -12,3 +12,7 @@ stays clean.
 
 See `docs/superpowers/specs/2026-06-04-it-npm-workspace-design.md` for the
 full design rationale.
+
+Adding a path here grows the IT shard matrix used by
+`.github/workflows/validation.yml`; see
+`docs/superpowers/specs/2026-06-04-ci-validation-design.md`.

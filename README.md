@@ -96,6 +96,14 @@ Pilot IT modules currently covered:
 
 Local edits to `web-components/packages/*` source files take effect in those IT modules without a re-install. See `docs/superpowers/specs/2026-06-04-it-npm-workspace-design.md` for the design.
 
+## Continuous Integration
+
+`.github/workflows/validation.yml` runs on every pull request to `main`. It runs `./gradlew install` once, then runs flow-components unit tests, Web Test Runner tests (currently disabled — see spec §Future Work), and Selenium ITs across up to 12 parallel shards using the npm-workspace overlay path.
+
+The IT shard count grows as `flow-components-overlay/overlays.txt` fills out, capped at 12 parallel jobs. See `docs/superpowers/specs/2026-06-04-ci-validation-design.md` for the design.
+
+Manual full-suite runs are available via the **Actions** tab (workflow: *Validation*, button: *Run workflow*). The `components` input filters the IT matrix to a subset of overlay modules.
+
 ## Future Plans
 
 - Local npm linking between repos for integration testing

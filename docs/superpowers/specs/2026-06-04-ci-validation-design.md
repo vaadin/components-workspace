@@ -33,17 +33,13 @@ on:
         description: 'Space-separated names (e.g. "grid combo-box"), empty = all overlay modules'
         required: false
         default: ''
-      debug:
-        description: 'Verbose Maven output (drop -q)'
-        type: boolean
-        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 ```
 
-`pull_request` and `workflow_dispatch` only. No nightly or merge-queue trigger. The `components` input filters the IT matrix; the `debug` input controls Maven verbosity.
+`pull_request` and `workflow_dispatch` only. No nightly or merge-queue trigger. The `components` input filters the IT matrix.
 
 ## Pipeline Shape
 
@@ -208,6 +204,23 @@ install:
 
 The Gradle layer is what ties these together — the workflow does not re-invent the ordering.
 
+### Workspace `package.json` shape
+
+For `mergeITs.js`, `wtr.js`, and other Node-driven scripts inside the submodules to find their devDependencies after a single workspace-level `npm install`, the workspace `package.json` includes both submodule roots as workspace members:
+
+```json
+{
+  "workspaces": [
+    "web-components",
+    "web-components/packages/*",
+    "flow-components-overlay/*/*",
+    "flow-components"
+  ]
+}
+```
+
+The Gradle `npmInstall` task lists `flow-components/package.json` as an input so that submodule pointer bumps that change its `devDependencies` re-run the install.
+
 After install, the job runs `flow-components/scripts/mergeITs.js` with the overlay component names so that only overlay modules' ITs end up in `flow-components/integration-tests/`. The matrix script then walks the merged tree.
 
 ## Fast-Check Branches
@@ -224,13 +237,14 @@ unit:
   steps:
     - checkout (recursive submodules)
     - setup-java 21
+    - setup-node 24
     - cache restore (fail-on-cache-miss: true)
     - sync overlay symlinks
-    - run: cd flow-components && mvn test -Drelease -T 4 -Dsurefire.parallel=classes -Dsurefire.threadCount=2 -DskipSvgChartsBuild -B -ntp
+    - run: cd flow-components && mvn test -Drelease -T 4 -Dsurefire.parallel=classes -Dsurefire.threadCount=2 -B -ntp
     - upload-artifact: surefire-reports (**/target/surefire-reports/TEST-*.xml)
 ```
 
-Runs the full flow-components unit-test suite. Not overlay-scoped — unit tests are fast and don't depend on the overlay path.
+Runs the full flow-components unit-test suite. Not overlay-scoped — unit tests are fast and don't depend on the overlay path. Node 24 is required because the `vaadin-charts-flow-svg-generator` submodule runs Node-driven tests as part of `mvn test`.
 
 ### `wtr` — Web Test Runner
 
@@ -239,16 +253,22 @@ wtr:
   needs: install
   runs-on: ubuntu-latest
   timeout-minutes: 30
+  env:
+    TB_LICENSE: ${{ secrets.TB_LICENSE }}
   steps:
     - checkout (recursive submodules)
+    - setup-java 21
     - setup-node 24
     - cache restore (fail-on-cache-miss: true)
     - sync overlay symlinks
+    - install TestBench license  (from TB_LICENSE secret)
     - run: cd flow-components && node scripts/wtr.js
     - upload-artifact: wtr-reports (**/wtr-results.xml)
 ```
 
-WTR runs all WTR-eligible components in flow-components. Like `unit`, not overlay-scoped.
+WTR runs all WTR-eligible components in flow-components. Like `unit`, not overlay-scoped. Java 21 is required because the WTR launcher reuses Maven-built classpath state. TestBench license is required because WTR-eligible components include some that gate on Vaadin Pro features.
+
+> **NOTE:** The `wtr` job is currently disabled via `if: false` while a license/setup issue is being triaged. The job body is left in place so it can be re-enabled by removing the `if:` line. Tracked under §Future Work.
 
 ### `package-war` — package the integration-tests WAR
 
@@ -436,6 +456,13 @@ its:
     - cache restore (WAR cache from package-war, fail-on-cache-miss: true)
     - sync overlay symlinks
     - install TestBench license
+    - name: Compute artifact shard id
+      id: shardid
+      env:
+        SHARD: ${{ matrix.shard }}
+      run: |
+        value="${SHARD//\//-}"
+        echo "value=$value" >> "$GITHUB_OUTPUT"
     - name: Run shard
       env:
         SHARD_TESTS: ${{ matrix.tests }}
@@ -455,7 +482,7 @@ its:
       if: always()
       uses: actions/upload-artifact@v6
       with:
-        name: failsafe-reports-${{ matrix.shard }}
+        name: failsafe-reports-${{ steps.shardid.outputs.value }}
         path: flow-components/integration-tests/target/failsafe-reports/TEST-*.xml
         retention-days: 1
         if-no-files-found: ignore
@@ -463,13 +490,13 @@ its:
       if: failure()
       uses: actions/upload-artifact@v6
       with:
-        name: error-screenshots-${{ matrix.shard }}
+        name: error-screenshots-${{ steps.shardid.outputs.value }}
         path: flow-components/integration-tests/error-screenshots/
         retention-days: 5
         if-no-files-found: ignore
 ```
 
-The `/` in `matrix.shard` (e.g. `3/12`) is converted to a hyphen for artifact names by replacing `/` with `-` inline via `${{ matrix.shard }}`-safe expressions if GH artifact names reject slashes; the spec assumes the runtime accepts `3/12` (as flow-components/validation.yml does today). If this proves not to be the case, use `matrix.shardId` (an integer-only field added to the matrix entry alongside `shard`).
+GitHub Actions rejects `/` in artifact names. The `Compute artifact shard id` step rewrites `3/12` to `3-12` via bash parameter expansion (`${SHARD//\//-}`) so the artifact uploads succeed.
 
 ### Shard sizing
 
@@ -622,6 +649,7 @@ After the rollout grows `overlays.txt`, the same workflow validates the new stat
 
 ## Future Work
 
+- **Re-enable the `wtr` job.** Currently gated by `if: false` while a Java/Node/TestBench-licensing issue is triaged. The job already has all the prerequisites wired (JDK 21, Node 24, license install) — flipping `if: false` to `if: true` should be the final step after the underlying issue is identified.
 - **Scheduled run** against latest submodule heads. Adds a nightly `cron:` trigger that bumps both submodules to upstream `main` before installing, catching cross-repo drift even without a workspace PR.
 - **Merge queue (`merge_group`) support.** Skip `pull_request` once we move to merge-queue gating to avoid double runs.
 - **Sub-sharding for huge modules.** If a single module's IT suite ever exceeds the 90-minute shard timeout, split it by IT-class count (mirror flow-components' `TARGET_PER_SHARD=35` approach within a single module).

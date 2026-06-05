@@ -114,6 +114,11 @@ jobs:
           distribution: 'temurin'
           cache: 'maven'
 
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
       - name: Restore install cache
         uses: actions/cache/restore@v5
         with:
@@ -133,7 +138,7 @@ jobs:
         run: |
           cd flow-components && mvn test -Drelease -T 4 \
             -Dsurefire.parallel=classes -Dsurefire.threadCount=2 \
-            -DskipSvgChartsBuild -B -ntp
+            -B -ntp
 
       - name: Upload unit test reports
         if: always()
@@ -146,14 +151,24 @@ jobs:
 
   wtr:
     name: WTR Tests
+    if: false
     needs: install
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      TB_LICENSE: ${{ secrets.TB_LICENSE }}
     steps:
       - uses: actions/checkout@v6
         with:
           submodules: recursive
           fetch-depth: 1
+
+      - name: Setup JDK 21
+        uses: actions/setup-java@v5
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: 'maven'
 
       - name: Setup Node
         uses: actions/setup-node@v6
@@ -174,6 +189,14 @@ jobs:
 
       - name: Sync overlay symlinks
         run: bash scripts/sync-flow-overlays.sh
+
+      - name: Install TestBench license
+        if: env.TB_LICENSE != ''
+        run: |
+          mkdir -p ~/.vaadin
+          user="${TB_LICENSE%%/*}"
+          key="${TB_LICENSE#*/}"
+          echo "{\"username\":\"${user}\",\"proKey\":\"${key}\"}" > ~/.vaadin/proKey
 
       - name: Run WTR tests
         run: cd flow-components && node scripts/wtr.js
