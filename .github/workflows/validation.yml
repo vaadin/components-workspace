@@ -394,4 +394,119 @@ jobs:
       checks: write
       actions: write
     steps:
-      - run: echo "results placeholder"
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          name: surefire-reports
+          path: surefire-reports
+
+      - uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          name: wtr-reports
+          path: wtr-reports
+
+      - uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          pattern: failsafe-reports-*
+          merge-multiple: true
+          path: failsafe-reports
+
+      - uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          pattern: error-screenshots-*
+          merge-multiple: true
+          path: error-screenshots
+
+      - name: Prune passing reports on red builds
+        run: |
+          has_failures=false
+          for dir in surefire-reports wtr-reports failsafe-reports; do
+            [ -d "$dir" ] || continue
+            if find "$dir" -name '*.xml' | xargs grep -lE 'failures="[1-9]|errors="[1-9]' 2>/dev/null | grep -q .; then
+              has_failures=true
+              break
+            fi
+          done
+          echo "has_failures=$has_failures" >> "$GITHUB_ENV"
+          if [ "$has_failures" = "true" ]; then
+            for dir in surefire-reports wtr-reports failsafe-reports; do
+              [ -d "$dir" ] || continue
+              find "$dir" -name '*.xml' | while read -r f; do
+                grep -qE 'failures="[1-9]|errors="[1-9]' "$f" || rm -f "$f"
+              done
+            done
+          fi
+
+      - name: Publish Unit Test results
+        id: unit-dorny
+        if: hashFiles('surefire-reports/**/TEST-*.xml') != ''
+        uses: dorny/test-reporter@a43b3a5f7366b97d083190328d2c652e1a8b6aa2
+        with:
+          name: Unit Tests
+          path: surefire-reports/**/TEST-*.xml
+          reporter: java-junit
+          list-tests: ${{ env.has_failures == 'true' && 'failed' || 'all' }}
+          fail-on-error: 'false'
+
+      - name: Publish WTR results
+        id: wtr-dorny
+        if: hashFiles('wtr-reports/**/wtr-results.xml') != ''
+        uses: dorny/test-reporter@a43b3a5f7366b97d083190328d2c652e1a8b6aa2
+        with:
+          name: WTR Tests
+          path: wtr-reports/**/wtr-results.xml
+          reporter: java-junit
+          list-tests: ${{ env.has_failures == 'true' && 'failed' || 'all' }}
+          fail-on-error: 'false'
+
+      - name: Publish IT results
+        id: it-dorny
+        if: hashFiles('failsafe-reports/TEST-*.xml') != ''
+        uses: dorny/test-reporter@a43b3a5f7366b97d083190328d2c652e1a8b6aa2
+        with:
+          name: Integration Tests
+          path: failsafe-reports/TEST-*.xml
+          reporter: java-junit
+          list-tests: ${{ env.has_failures == 'true' && 'failed' || 'all' }}
+          fail-on-error: 'false'
+
+      - name: Upload merged error screenshots
+        if: needs.its.result != 'success'
+        uses: actions/upload-artifact@v6
+        with:
+          name: error-screenshots
+          path: error-screenshots/
+          retention-days: 5
+          if-no-files-found: ignore
+
+      - name: Delete intermediate artifacts
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          gh api --paginate "repos/$GH_REPO/actions/runs/$RUN_ID/artifacts" \
+            --jq '.artifacts[] | select(
+              (.name | startswith("error-screenshots-")) or
+              (.name | startswith("failsafe-reports-"))
+            ) | "\(.id) \(.name)"' \
+          | while read -r id name; do
+              gh api -X DELETE "repos/$GH_REPO/actions/artifacts/$id" || true
+            done
+
+      - name: Fail if any test failed
+        if: always()
+        run: |
+          failed=false
+          [[ "${{ steps.unit-dorny.outputs.conclusion }}" == "failure" ]] && failed=true
+          [[ "${{ steps.wtr-dorny.outputs.conclusion }}"  == "failure" ]] && failed=true
+          [[ "${{ steps.it-dorny.outputs.conclusion }}"   == "failure" ]] && failed=true
+          [[ "$failed" == "true" ]] && exit 1 || exit 0
