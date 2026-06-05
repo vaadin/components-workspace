@@ -5,7 +5,8 @@
   "license": "Apache-2.0",
   "workspaces": [
     "web-components/packages/*",
-    "flow-components-overlay/*/*"
+    "flow-components-overlay/*/*",
+    "flow-components"
   ],
   "devDependencies": {
     "@types/node": "^25.9.1",

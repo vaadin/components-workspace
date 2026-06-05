@@ -32,6 +32,7 @@ val npmInstall = tasks.named<NpmTask>("npmInstall") {
     dependsOn(":flow-components:syncFlowOverlays")
     inputs.file("package.json")
     inputs.file("package-lock.json")
+    inputs.file("flow-components/package.json")
     outputs.dir("node_modules")
 }
 
