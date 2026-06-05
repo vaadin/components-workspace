@@ -17,6 +17,15 @@ MAX_SHARDS="${MAX_SHARDS:-12}"
 TARGET_PER_SHARD="${TARGET_PER_SHARD:-35}"
 ROOT="${1:-flow-components/integration-tests/src/test/java}"
 
+if ! [[ "$MAX_SHARDS" =~ ^[1-9][0-9]*$ ]]; then
+  echo "::error::MAX_SHARDS must be a positive integer (got: $MAX_SHARDS)" >&2
+  exit 1
+fi
+if ! [[ "$TARGET_PER_SHARD" =~ ^[1-9][0-9]*$ ]]; then
+  echo "::error::TARGET_PER_SHARD must be a positive integer (got: $TARGET_PER_SHARD)" >&2
+  exit 1
+fi
+
 if [ ! -d "$ROOT" ]; then
   echo "::error::Merged integration-tests source tree not found at $ROOT (did mergeITs.js run?)" >&2
   exit 1

@@ -76,9 +76,25 @@ rm -rf "$fivehundred"
 pass "500 classes -> 12 shards covering all classes"
 
 # Case 7: MAX_SHARDS=4 override.
-out=$(MAX_SHARDS=4 bash "$SCRIPT" "$(make_fixture 500)")
+big=$(make_fixture 500)
+out=$(MAX_SHARDS=4 bash "$SCRIPT" "$big")
 n=$(echo "$out" | jq -r '.include | length')
 [ "$n" = "4" ] || fail "MAX_SHARDS=4 override: got $n shards"
+rm -rf "$big"
 pass "MAX_SHARDS env override respected"
+
+# Case 8: TARGET_PER_SHARD=10 override on 30 classes -> 3 shards.
+thirty=$(make_fixture 30)
+out=$(TARGET_PER_SHARD=10 bash "$SCRIPT" "$thirty")
+n=$(echo "$out" | jq -r '.include | length')
+[ "$n" = "3" ] || fail "TARGET_PER_SHARD=10 on 30 classes: got $n shards (want 3)"
+rm -rf "$thirty"
+pass "TARGET_PER_SHARD env override respected"
+
+# Case 9: MAX_SHARDS=0 must be rejected with a clear error (silent data loss otherwise).
+if MAX_SHARDS=0 bash "$SCRIPT" "$(mktemp -d)" >/dev/null 2>&1; then
+  fail "MAX_SHARDS=0 should be rejected"
+fi
+pass "MAX_SHARDS=0 rejected"
 
 echo "All tests pass."
