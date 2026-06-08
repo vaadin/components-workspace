@@ -48,15 +48,16 @@ A new Node script at `scripts/generate-overlays.js` automates the authoring step
 - `web-components/packages/` (determines which `@vaadin/*` names are available locally)
 - `flow-components-overlay/` (existing overlay files mark which IT modules are already covered)
 
-### Algorithm (per IT module not yet covered)
+### Algorithm
 
-1. Discover candidates: scan `flow-components/` for every `vaadin-<name>-flow-parent/vaadin-<name>-flow-integration-tests/` directory.
-2. Skip if an overlay file already exists at `flow-components-overlay/vaadin-<name>-flow-parent/vaadin-<name>-flow-integration-tests/package.json`.
-3. Locate the main component Java source: `flow-components/vaadin-<name>-flow-parent/vaadin-<name>-flow/src/**/*.java`.
-4. Extract all `@NpmPackage(value = "@vaadin/<pkg>", …)` annotations.
-5. Filter to those where `web-components/packages/<pkg>/` exists.
-6. If no matching packages: skip this module (it appears in the skip log only).
-7. Write `flow-components-overlay/vaadin-<name>-flow-parent/vaadin-<name>-flow-integration-tests/package.json`:
+1. List every `@vaadin/<name>` for which `web-components/packages/<name>/` exists. This becomes the uniform `dependencies` list for every overlay.
+2. Discover candidates: scan `flow-components/` for every `vaadin-<name>-flow-parent/vaadin-<name>-flow-integration-tests/` directory.
+3. For each candidate:
+   1. Locate the main component Java source: `flow-components/vaadin-<name>-flow-parent/vaadin-<name>-flow/src/**/*.java`.
+   2. Extract all `@NpmPackage(value = "@vaadin/<pkg>", …)` annotations.
+   3. Filter to those where `web-components/packages/<pkg>/` exists.
+   4. If no matching packages: skip this module (it appears in the skip log only).
+   5. Otherwise write `flow-components-overlay/vaadin-<name>-flow-parent/vaadin-<name>-flow-integration-tests/package.json`:
 
 ```json
 {
@@ -64,23 +65,28 @@ A new Node script at `scripts/generate-overlays.js` automates the authoring step
   "version": "0.0.0",
   "private": true,
   "dependencies": {
-    "@vaadin/<pkg>": "file:../../../web-components/packages/<pkg>"
+    "@vaadin/a11y-base": "file:../../../web-components/packages/a11y-base",
+    "@vaadin/accordion": "file:../../../web-components/packages/accordion",
+    "…": "file:../../../web-components/packages/…",
+    "@vaadin/virtual-list": "file:../../../web-components/packages/virtual-list"
   }
 }
 ```
 
-For modules with multiple direct packages (e.g. avatar has `@vaadin/avatar` and `@vaadin/avatar-group`), all are listed as `file:` deps.
+Every overlay's `dependencies` object lists **every** `@vaadin/*` package from step 1, so the entire `@vaadin/*` graph (direct and transitive) resolves to the local workspace.
 
-The root `package.json` `workspaces` array does not need updating per module: the positive glob `flow-components/*-flow-parent/*-flow-integration-tests` automatically picks up any new module that appears in the submodule. To exclude a module from npm workspaces (typically because it has no overlay and its Flow-generated leftover `package.json` would trip up the install), add a negative-glob entry there manually.
+The `@NpmPackage` check in step 3 only gates **whether** the module gets an overlay. The dependency content is uniform across every overlay.
+
+The root `package.json` `workspaces` array does not need updating per module: the positive glob `flow-components/*-flow-parent/*-flow-integration-tests` automatically picks up any new module. To exclude a module from npm workspaces (typically because it has no overlay and its Flow-generated leftover `package.json` would trip up the install), add a negative-glob entry there manually.
 
 ### Output
 
-- New `package.json` files under `flow-components-overlay/` (one per included module).
-- A summary to stdout: modules added, modules skipped, modules already covered.
+- A `package.json` file written under `flow-components-overlay/<parent>/<it>/` for every IT module that passed step 3. Existing files are overwritten — re-running the script restores the canonical shape.
+- A summary to stdout: modules written, modules skipped.
 
-### Non-destructive
+### Idempotence
 
-The script never modifies existing overlay `package.json` files (pilot modules keep their hand-authored/expanded content). If a module already has an overlay file, it is skipped entirely.
+Running the script twice in a row produces identical output. Existing overlay files are overwritten so the script can also be used to **reset** the overlay tree after Flow's maven plugin has merged its own deps into the symlinked overlay during a local build.
 
 ## File Path Convention
 

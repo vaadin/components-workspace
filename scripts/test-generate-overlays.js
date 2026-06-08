@@ -5,7 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { extractVaadinPackages, filterToLocalPackages, buildOverlayPackageJson, discoverItModules } = require('./generate-overlays.js');
+const { extractVaadinPackages, filterToLocalPackages, buildOverlayPackageJson, discoverLocalVaadinPackages, discoverItModules } = require('./generate-overlays.js');
 
 test('extractVaadinPackages — single @vaadin annotation', () => {
   const src = '@NpmPackage(value = "@vaadin/accordion", version = "25.2.0-beta1")';
@@ -104,4 +104,41 @@ test('discoverItModules — finds short names from vaadin-<name>-flow-parent/vaa
 
 test('discoverItModules — returns empty array when flowDir does not exist', () => {
   assert.deepEqual(discoverItModules('/tmp/this-does-not-exist-' + Date.now()), []);
+});
+
+test('discoverLocalVaadinPackages — returns @vaadin/<dir> for every subdirectory, sorted', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'gen-overlays-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'avatar'));
+    fs.mkdirSync(path.join(tmp, 'a11y-base'));
+    fs.mkdirSync(path.join(tmp, 'button'));
+    // A regular file under packages/ is ignored.
+    fs.writeFileSync(path.join(tmp, 'README.md'), '');
+    assert.deepEqual(discoverLocalVaadinPackages(tmp), [
+      '@vaadin/a11y-base',
+      '@vaadin/avatar',
+      '@vaadin/button',
+    ]);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('discoverLocalVaadinPackages — returns empty array when packages dir does not exist', () => {
+  assert.deepEqual(discoverLocalVaadinPackages('/tmp/this-does-not-exist-' + Date.now()), []);
+});
+
+test('buildOverlayPackageJson — full local @vaadin/* set produces a file: URL per package', () => {
+  const content = buildOverlayPackageJson('button', [
+    '@vaadin/a11y-base',
+    '@vaadin/button',
+    '@vaadin/component-base',
+  ]);
+  const parsed = JSON.parse(content);
+  assert.equal(parsed.name, '@vaadin-flow-integration-tests/vaadin-button-flow-integration-tests');
+  assert.deepEqual(parsed.dependencies, {
+    '@vaadin/a11y-base': 'file:../../../web-components/packages/a11y-base',
+    '@vaadin/button': 'file:../../../web-components/packages/button',
+    '@vaadin/component-base': 'file:../../../web-components/packages/component-base',
+  });
 });

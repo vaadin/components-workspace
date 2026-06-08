@@ -147,13 +147,13 @@ node_modules
 - Names use a `@vaadin-flow-integration-tests/*` scope so they cannot collide with real `@vaadin/*` packages.
 - `private: true` + `version: 0.0.0` makes accidental publishing impossible.
 - The `file:` path is three `..` segments back to workspace root, then into `web-components/packages/<name>`. The depth is the same whether resolved from the overlay path or the symlinked submodule path — both are 3 levels deep below the workspace root — so npm resolves `file:` URLs correctly from either viewpoint.
-- IT modules declare **only the direct `@vaadin/*` packages their Java sources reference via `@NpmPackage`**. Transitive deps resolve through the workspace automatically; we do not list them.
+- **Every** IT module overlay declares every `@vaadin/*` package present in `web-components/packages/` as a `file:` dependency, not just the IT module's primary component. This guarantees the entire `@vaadin/*` graph resolves to the local workspace, defending against version-mismatch fallbacks to the npm registry. Flow's maven plugin merges its own deps on top at build time; the existing `file:` URLs survive the merge unchanged.
 
 ### Discovery rule for dependencies
 
-For an IT module at `vaadin-X-flow-parent/vaadin-X-flow-integration-tests/`, grep the corresponding Java sources for `@NpmPackage(value = "@vaadin/...")`. The distinct values are the dependencies list. Their versions all match `25.2.0-beta1` (Lerna-synced across web-components).
+For an IT module at `vaadin-X-flow-parent/vaadin-X-flow-integration-tests/`, the existence of any matching `@NpmPackage(value = "@vaadin/...")` annotation whose value is also a directory under `web-components/packages/` qualifies the module for an overlay. Modules with no matching annotation (e.g., `renderer`, `ai-components`, `spreadsheet`) are skipped.
 
-For the pilot we do this by hand for the four modules. An automated generator script that derives these from annotations is a future-work item.
+When an overlay is written, its `dependencies` list every `@vaadin/<name>` package present in `web-components/packages/` as a `file:` URL — not only the ones the Java source mentions. The uniform deps list ensures the entire `@vaadin/*` graph (direct and transitive) resolves to the local workspace.
 
 ## Setup Script
 

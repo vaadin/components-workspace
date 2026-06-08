@@ -1,11 +1,16 @@
 #!/usr/bin/env node
-// Generates minimal overlay package.json files for flow-components IT modules
-// whose primary component declares @NpmPackage annotations matching @vaadin/*
+// Generates overlay package.json files for flow-components IT modules whose
+// primary component declares @NpmPackage annotations matching @vaadin/*
 // packages present in web-components/packages/.
 //
-// Discovers IT modules by scanning flow-components/ directly. Skips any module
-// that already has an overlay file under flow-components-overlay/.
-// Non-destructive: never overwrites an existing overlay file.
+// Discovers IT modules by scanning flow-components/ directly. Each generated
+// overlay declares **every** @vaadin/* package present in web-components/
+// packages/ as a `file:` dependency, so npm resolves them all to the local
+// workspace regardless of which one the IT module is primarily testing and
+// regardless of what versions Flow's maven plugin later adds.
+//
+// Always overwrites: re-running the script restores the canonical shape after
+// Flow's maven plugin has merged its own deps into the symlinked overlay.
 
 'use strict';
 
@@ -27,6 +32,15 @@ function filterToLocalPackages(packageNames, webComponentsPackagesDir) {
     const shortName = name.replace(/^@vaadin\//, '');
     return fs.existsSync(path.join(webComponentsPackagesDir, shortName));
   });
+}
+
+// Lists every @vaadin/<name> for which web-components/packages/<name>/ exists.
+function discoverLocalVaadinPackages(webComponentsPackagesDir) {
+  if (!fs.existsSync(webComponentsPackagesDir)) return [];
+  return fs.readdirSync(webComponentsPackagesDir, { withFileTypes: true })
+    .filter((e) => e.isDirectory())
+    .map((e) => `@vaadin/${e.name}`)
+    .sort();
 }
 
 function buildOverlayPackageJson(componentName, packages) {
@@ -93,19 +107,12 @@ function main({ workspaceRoot }) {
     process.exit(1);
   }
 
+  const allLocalVaadinPackages = discoverLocalVaadinPackages(webPackagesDir);
   const candidates = discoverItModules(flowDir);
-  const added = [];
+  const written = [];
   const skipped = [];
-  const alreadyCovered = [];
 
   for (const name of candidates) {
-    const outDir = path.join(overlayDir, `vaadin-${name}-flow-parent`, `vaadin-${name}-flow-integration-tests`);
-    const outFile = path.join(outDir, 'package.json');
-    if (fs.existsSync(outFile)) {
-      alreadyCovered.push(name);
-      continue;
-    }
-
     const srcDir = path.join(flowDir, `vaadin-${name}-flow-parent`, `vaadin-${name}-flow`, 'src');
     const allJava = readJavaSources(srcDir);
     const vaadinPkgs = extractVaadinPackages(allJava);
@@ -116,16 +123,16 @@ function main({ workspaceRoot }) {
       continue;
     }
 
+    const outDir = path.join(overlayDir, `vaadin-${name}-flow-parent`, `vaadin-${name}-flow-integration-tests`);
+    const outFile = path.join(outDir, 'package.json');
     fs.mkdirSync(outDir, { recursive: true });
-    fs.writeFileSync(outFile, buildOverlayPackageJson(name, localPkgs));
-    added.push({ name, packages: localPkgs });
+    fs.writeFileSync(outFile, buildOverlayPackageJson(name, allLocalVaadinPackages));
+    written.push(name);
   }
 
-  console.log(`Added:           ${added.length}`);
-  for (const a of added) console.log(`  + ${a.name}  [${a.packages.join(', ')}]`);
-  console.log(`Already covered: ${alreadyCovered.length}`);
-  for (const n of alreadyCovered) console.log(`  = ${n}`);
-  console.log(`Skipped:         ${skipped.length}`);
+  console.log(`Written:          ${written.length} (every overlay lists all ${allLocalVaadinPackages.length} local @vaadin/* packages)`);
+  for (const n of written) console.log(`  + ${n}`);
+  console.log(`Skipped:          ${skipped.length}`);
   for (const s of skipped) console.log(`  - ${s.name}  (${s.reason})`);
 }
 
@@ -133,6 +140,7 @@ module.exports = {
   extractVaadinPackages,
   filterToLocalPackages,
   buildOverlayPackageJson,
+  discoverLocalVaadinPackages,
   discoverItModules,
   main,
 };
