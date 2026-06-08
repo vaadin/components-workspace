@@ -5,7 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { extractVaadinPackages, filterToLocalPackages, buildOverlayPackageJson, buildWorkspacesArray } = require('./generate-overlays.js');
+const { extractVaadinPackages, filterToLocalPackages, buildOverlayPackageJson } = require('./generate-overlays.js');
 
 test('extractVaadinPackages — single @vaadin annotation', () => {
   const src = '@NpmPackage(value = "@vaadin/accordion", version = "25.2.0-beta1")';
@@ -85,26 +85,4 @@ test('buildOverlayPackageJson — multiple deps, sorted', () => {
 test('buildOverlayPackageJson — output ends with trailing newline', () => {
   const content = buildOverlayPackageJson('accordion', ['@vaadin/accordion']);
   assert.equal(content.endsWith('\n'), true);
-});
-
-test('buildWorkspacesArray — prefixes overlay entries with flow-components/ and keeps base entries', () => {
-  const result = buildWorkspacesArray([
-    'vaadin-button-flow-parent/vaadin-button-flow-integration-tests',
-    'vaadin-accordion-flow-parent/vaadin-accordion-flow-integration-tests',
-  ]);
-  assert.deepEqual(result, [
-    'web-components',
-    'web-components/packages/*',
-    'flow-components',
-    'flow-components/vaadin-button-flow-parent/vaadin-button-flow-integration-tests',
-    'flow-components/vaadin-accordion-flow-parent/vaadin-accordion-flow-integration-tests',
-  ]);
-});
-
-test('buildWorkspacesArray — empty overlays returns only base entries', () => {
-  assert.deepEqual(buildWorkspacesArray([]), [
-    'web-components',
-    'web-components/packages/*',
-    'flow-components',
-  ]);
 });

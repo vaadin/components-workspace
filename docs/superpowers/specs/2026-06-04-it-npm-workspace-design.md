@@ -118,15 +118,17 @@ node_modules
     "web-components",
     "web-components/packages/*",
     "flow-components",
-    "flow-components/vaadin-button-flow-parent/vaadin-button-flow-integration-tests",
-    "flow-components/vaadin-grid-flow-parent/vaadin-grid-flow-integration-tests"
+    "flow-components/*-flow-parent/*-flow-integration-tests",
+    "!flow-components/vaadin-ai-components-flow-parent/vaadin-ai-components-flow-integration-tests",
+    "!flow-components/vaadin-renderer-flow-parent/vaadin-renderer-flow-integration-tests",
+    "!flow-components/vaadin-spreadsheet-flow-parent/vaadin-spreadsheet-flow-integration-tests"
   ]
 }
 ```
 
 - The IT-module workspace members live at their **submodule** paths (`flow-components/<parent>/<it-module>`), not the overlay paths. npm reads each member's `package.json` through the symlink that the setup script materialises in the submodule path; the symlink points back to the real file in `flow-components-overlay/`. The overlay tree remains the source of truth — edits go there — but npm's view of "where this workspace lives" is the same path where the IT tests actually run.
-- The IT-module entries are listed explicitly rather than via a glob (`flow-components/*/*` style). A glob would match Flow's leftover build-artifact `package.json` files in non-overlaid IT modules (`renderer`, `ai-components`, `spreadsheet`), and those files have no `name`, which produces `EDUPLICATEWORKSPACE` at install time. The list is maintained by the generator script alongside `overlays.txt`.
-- `web-components`, `web-components/packages/*`, and `flow-components` cover the two submodule roots plus the web-components package set. The base entries are constant across rollout state.
+- The positive glob `flow-components/*-flow-parent/*-flow-integration-tests` matches every IT module under any `*-flow-parent` directory. The three negative-glob entries exclude IT modules without overlays (`ai-components`, `renderer`, `spreadsheet`) — their leftover Flow-generated `package.json` files have no `name`, which would otherwise trigger `EDUPLICATEWORKSPACE`. npm supports `!`-prefixed negative globs in the `workspaces` array since npm 7.
+- `web-components`, `web-components/packages/*`, and `flow-components` cover the two submodule roots plus the web-components package set.
 
 ### Per-IT-module (example: date-picker)
 

@@ -42,21 +42,6 @@ function buildOverlayPackageJson(componentName, packages) {
   return JSON.stringify(obj, null, 2) + '\n';
 }
 
-// Base entries kept in the workspaces array alongside the per-IT-module paths.
-// IT-module entries are stripped and rewritten from overlays.txt on every run.
-const BASE_WORKSPACES = [
-  'web-components',
-  'web-components/packages/*',
-  'flow-components',
-];
-
-function buildWorkspacesArray(overlayEntries) {
-  return [
-    ...BASE_WORKSPACES,
-    ...overlayEntries.map((p) => `flow-components/${p}`),
-  ];
-}
-
 // Module list from spec §Scope (all "included" modules; pilot is excluded by
 // reading existing overlays.txt entries).
 const CANDIDATE_MODULES = [
@@ -149,15 +134,6 @@ function main({ workspaceRoot }) {
     fs.writeFileSync(overlaysFile, current + trailing + additions);
   }
 
-  // Sync the root package.json's "workspaces" array with overlays.txt. The
-  // IT-module workspace members are the submodule paths (which carry symlinked
-  // package.json files pointing back into flow-components-overlay/).
-  const packageJsonPath = path.join(workspaceRoot, 'package.json');
-  const allOverlays = readExistingOverlays(overlaysFile);
-  const pkg = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
-  pkg.workspaces = buildWorkspacesArray(allOverlays);
-  fs.writeFileSync(packageJsonPath, JSON.stringify(pkg, null, 2) + '\n');
-
   console.log(`Added:           ${added.length}`);
   for (const a of added) console.log(`  + ${a.name}  [${a.packages.join(', ')}]`);
   console.log(`Already covered: ${alreadyCovered.length}`);
@@ -170,7 +146,6 @@ module.exports = {
   extractVaadinPackages,
   filterToLocalPackages,
   buildOverlayPackageJson,
-  buildWorkspacesArray,
   main,
 };
 
