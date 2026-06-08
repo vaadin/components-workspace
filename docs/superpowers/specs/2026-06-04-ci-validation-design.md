@@ -86,11 +86,12 @@ Including `github.sha` makes the key change on every workspace commit, which is 
 
 | Path | Populated by |
 |---|---|
-| `~/.m2/repository/com/vaadin` | `mvn install` inside flow-components |
+| `~/.m2/repository/com/vaadin` | `mvn -DskipTests install` (full flow-components reactor) |
 | `node_modules` (workspace root) | `npm install` in install job |
 | `web-components/node_modules` | `yarn install` inside web-components |
 | `web-components/.yarn` | `yarn install` inside web-components |
-| `flow-components/vaadin-charts-flow-parent/vaadin-charts-flow-svg-generator/src/main/resources/META-INF/frontend/generated` | `mvn install` in flow-components |
+| `web-components/packages/*/dist` | `yarn build` inside web-components |
+| `flow-components/vaadin-charts-flow-parent/vaadin-charts-flow-svg-generator/src/main/resources/META-INF/frontend/generated` | `mvn -DskipTests install` in flow-components |
 
 The overlay symlinks inside flow-components are **not** cached. They live inside the submodule working tree (which is reset on every checkout) and are cheap to recreate via `scripts/sync-flow-overlays.sh`. Each downstream job runs the sync script after restoring the cache.
 
@@ -105,6 +106,7 @@ The overlay symlinks inside flow-components are **not** cached. They live inside
       node_modules
       web-components/node_modules
       web-components/.yarn
+      web-components/packages/*/dist
       flow-components/vaadin-charts-flow-parent/vaadin-charts-flow-svg-generator/src/main/resources/META-INF/frontend/generated
     fail-on-cache-miss: true
 
@@ -119,7 +121,7 @@ The overlay symlinks inside flow-components are **not** cached. They live inside
 install:
   name: Install
   runs-on: ubuntu-latest
-  timeout-minutes: 30
+  timeout-minutes: 60
   outputs:
     cache-key: ${{ steps.key.outputs.value }}
     it-matrix: ${{ steps.matrix.outputs.value }}
@@ -157,11 +159,12 @@ install:
           node_modules
           web-components/node_modules
           web-components/.yarn
+          web-components/packages/*/dist
           flow-components/vaadin-charts-flow-parent/vaadin-charts-flow-svg-generator/src/main/resources/META-INF/frontend/generated
 
-    - name: Workspace install
+    - name: Workspace install and build
       if: steps.cache.outputs.cache-hit != 'true'
-      run: ./gradlew install --no-daemon
+      run: ./gradlew build --no-daemon
 
     - name: Save cache
       if: steps.cache.outputs.cache-hit != 'true'
@@ -173,6 +176,7 @@ install:
           node_modules
           web-components/node_modules
           web-components/.yarn
+          web-components/packages/*/dist
           flow-components/vaadin-charts-flow-parent/vaadin-charts-flow-svg-generator/src/main/resources/META-INF/frontend/generated
 
     - name: Merge overlay ITs into integration-tests/
@@ -195,14 +199,17 @@ install:
         } >> "$GITHUB_OUTPUT"
 ```
 
-`./gradlew install` runs in sequence:
+`./gradlew build` runs in sequence:
 
 1. `:flow-components:syncFlowOverlays` — materialize overlay symlinks.
 2. `:npmInstall` — `npm install` at workspace root; populates `node_modules/`.
 3. `:web-components:install` — `yarn install` inside the submodule.
-4. `:flow-components:install` — `mvn -DskipTests install` (full reactor).
+4. `:web-components:build` — `yarn build` inside the submodule; compiles TypeScript and produces `packages/*/dist/` bundles consumed by downstream IT frontend builds.
+5. `:flow-components:build` — `mvn -DskipTests install` (full reactor); installs all `com.vaadin:*` JARs into `~/.m2/repository/com/vaadin/` so `package-war` and IT shards can resolve them without re-compiling.
 
 The Gradle layer is what ties these together — the workflow does not re-invent the ordering.
+
+> **Why build, not just install:** `flow-components` IT tests require both compiled Maven artifacts (to resolve `com.vaadin:*` deps during WAR packaging) and built web-components `dist/` bundles (so `flow:build-frontend` uses the local compiled JS rather than fetching from the registry). Running only `install` leaves both of these absent. The `build` target satisfies both requirements in one step and its outputs are fully cacheable.
 
 ### Workspace `package.json` shape
 
@@ -323,6 +330,8 @@ package-war:
 ```
 
 The packaged WAR is the input every IT shard restores. Keyed off pom.xml + IT java sources, so unrelated PR pushes (overlay-only) hit the cache.
+
+Because the install job already ran `mvn -DskipTests install` over the full flow-components reactor, all `com.vaadin:*` JARs are in `~/.m2/repository/com/vaadin` (restored from the install cache). The `mvn package -pl integration-tests` step here only compiles and packages the integration-tests module itself — it does not recompile the rest of the reactor.
 
 ## IT Shards
 
