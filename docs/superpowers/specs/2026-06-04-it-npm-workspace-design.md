@@ -115,14 +115,18 @@ node_modules
   "private": true,
   "version": "0.0.0",
   "workspaces": [
+    "web-components",
     "web-components/packages/*",
-    "flow-components-overlay/*/*"
+    "flow-components",
+    "flow-components/vaadin-button-flow-parent/vaadin-button-flow-integration-tests",
+    "flow-components/vaadin-grid-flow-parent/vaadin-grid-flow-integration-tests"
   ]
 }
 ```
 
-- `flow-components-overlay/*/*` matches `flow-components-overlay/<parent>/<it-module>`, where each IT module's `package.json` lives in the overlay tree.
-- The workspace glob points at the **overlay** path, not the submodule path. The symlinks inside the submodule are not workspace members — they are just files visible to Flow's plugin when Maven runs. npm reads workspace members from the overlay tree where the real files live.
+- The IT-module workspace members live at their **submodule** paths (`flow-components/<parent>/<it-module>`), not the overlay paths. npm reads each member's `package.json` through the symlink that the setup script materialises in the submodule path; the symlink points back to the real file in `flow-components-overlay/`. The overlay tree remains the source of truth — edits go there — but npm's view of "where this workspace lives" is the same path where the IT tests actually run.
+- The IT-module entries are listed explicitly rather than via a glob (`flow-components/*/*` style). A glob would match Flow's leftover build-artifact `package.json` files in non-overlaid IT modules (`renderer`, `ai-components`, `spreadsheet`), and those files have no `name`, which produces `EDUPLICATEWORKSPACE` at install time. The list is maintained by the generator script alongside `overlays.txt`.
+- `web-components`, `web-components/packages/*`, and `flow-components` cover the two submodule roots plus the web-components package set. The base entries are constant across rollout state.
 
 ### Per-IT-module (example: date-picker)
 
@@ -141,7 +145,7 @@ node_modules
 
 - Names use a `@vaadin-flow-integration-tests/*` scope so they cannot collide with real `@vaadin/*` packages.
 - `private: true` + `version: 0.0.0` makes accidental publishing impossible.
-- The `file:` path is **relative to the overlay file's location** (three `..` segments back to workspace root, then into `web-components/packages/<name>`).
+- The `file:` path is three `..` segments back to workspace root, then into `web-components/packages/<name>`. The depth is the same whether resolved from the overlay path or the symlinked submodule path — both are 3 levels deep below the workspace root — so npm resolves `file:` URLs correctly from either viewpoint.
 - IT modules declare **only the direct `@vaadin/*` packages their Java sources reference via `@NpmPackage`**. Transitive deps resolve through the workspace automatically; we do not list them.
 
 ### Discovery rule for dependencies

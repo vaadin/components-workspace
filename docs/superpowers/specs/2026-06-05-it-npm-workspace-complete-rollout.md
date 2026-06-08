@@ -71,10 +71,13 @@ For modules with multiple direct packages (e.g. avatar has `@vaadin/avatar` and 
 
 6. Append the module's relative path to `flow-components-overlay/overlays.txt`.
 
+7. Rewrite the root `package.json` `workspaces` array from `overlays.txt`: base entries (`web-components`, `web-components/packages/*`, `flow-components`) plus one explicit `flow-components/<parent>/<it>` entry per overlay. The IT-module entries are listed explicitly rather than via a glob because a glob would match Flow's leftover build-artifact `package.json` files in non-overlaid IT modules and trigger `EDUPLICATEWORKSPACE`.
+
 ### Output
 
 - Updated `flow-components-overlay/overlays.txt` (new entries appended, existing entries preserved).
 - New `package.json` files under `flow-components-overlay/` (one per included module).
+- Updated root `package.json` `workspaces` array (rewritten from `overlays.txt` + base entries).
 - A summary to stdout: modules added, modules skipped, modules already covered.
 
 ### Non-destructive
@@ -154,10 +157,10 @@ A green `Collect results` job on the full run is the acceptance gate.
 
 ## Rollout Sequence
 
-1. Run `scripts/generate-overlays.js` — produces all new overlay `package.json` files and updated `overlays.txt`.
+1. Run `scripts/generate-overlays.js` — produces all new overlay `package.json` files, updated `overlays.txt`, and rewritten root `package.json` `workspaces` array.
 2. Run `npm install --ignore-scripts` — updates `package-lock.json`.
 3. Run `./gradlew build --no-daemon` — verifies symlinks materialize cleanly, npm resolves correctly, web-components TypeScript compiles, and all flow-components Maven modules install successfully.
-4. Commit: `flow-components-overlay/`, updated `overlays.txt`, updated `package-lock.json`.
+4. Commit: `flow-components-overlay/`, updated `overlays.txt`, updated root `package.json`, updated `package-lock.json`.
 5. Push to `verify-ci` branch — triggers CI (which runs `./gradlew build` in the install job, covering both submodule builds).
 6. Stage 1 targeted run: pass → proceed. Fail → debug one component at a time.
 7. Stage 2 full run: pass → merge to `main`.
@@ -173,9 +176,10 @@ A green `Collect results` job on the full run is the acceptance gate.
 
 | Artifact | Role |
 |---|---|
-| `2026-06-04-it-npm-workspace-design.md` | Foundational architecture (unchanged) |
+| `2026-06-04-it-npm-workspace-design.md` | Foundational architecture; `Workspace root` section updated to reflect that workspace members live at submodule paths (via symlinks), not overlay paths |
 | `flow-components-overlay/overlays.txt` | Extended by generator; consumed by `sync-flow-overlays.sh` (unchanged) |
 | `scripts/sync-flow-overlays.sh` | Unchanged — already reads the full `overlays.txt` |
-| `scripts/generate-overlays.js` | New — automates overlay authoring |
+| `scripts/generate-overlays.js` | New — automates overlay authoring AND keeps root `package.json` `workspaces` array in sync with `overlays.txt` |
 | `.github/workflows/validation.yml` | Verification pipeline (unchanged) |
+| `package.json` (workspace root) | `workspaces` array rewritten by the generator on every run |
 | `package-lock.json` | Updated after generator run |
