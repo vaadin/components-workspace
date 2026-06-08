@@ -214,6 +214,8 @@ val npmInstall = tasks.named<NpmTask>("npmInstall") {
 
 `:web-components:install` becomes a thin delegate to `:npmInstall` — web-components is a workspace member, so its dependencies are installed by the root npm install. No `YarnTask` is wired in; devs working inside `web-components/` still run `yarn …` directly within the submodule for the inner test/api-docs/dev sub-workspaces.
 
+A `.npmrc` at the workspace root sets `ignore-scripts=true`. This is required because web-components' `postinstall: patch-package` references packages (`@web/rollup-plugin-html`, `@web/test-runner-visual-regression`, `lerna`) that live in web-components' inner yarn-workspaces (`dev/`, `test/`). The outer npm workspace does not recurse into those, so patch-package can't find the packages and fails. The patches only matter for upstream `dev:build` (the gh-pages playground build) and `test-runner-visual-regression`, neither of which runs from this workspace. Devs running `yarn` directly inside `web-components/` still apply the patches normally — yarn does not honour npm's `ignore-scripts`.
+
 After this change, `./gradlew install` runs:
 
 1. `:flow-components:syncFlowOverlays` — creates / verifies overlay symlinks.

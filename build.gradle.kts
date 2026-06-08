@@ -21,6 +21,8 @@ val npmInstall = tasks.named<NpmTask>("npmInstall") {
     description = "Installs all workspace npm dependencies."
     group = "build"
     dependsOn(":flow-components:syncFlowOverlays")
+    // `ignore-scripts=true` is set in `.npmrc` at the workspace root; see the
+    // comment there for why postinstall hooks must be skipped.
     inputs.file("package.json")
     inputs.file("package-lock.json")
     inputs.file("flow-components/package.json")
