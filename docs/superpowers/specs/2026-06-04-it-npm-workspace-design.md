@@ -68,7 +68,6 @@ components-workspace/
 │
 ├── flow-components-overlay/                  # NEW — workspace-tracked overlay tree
 │   ├── README.md                             # one-paragraph orientation
-│   ├── overlays.txt                          # newline-separated list of overlay targets
 │   ├── vaadin-button-flow-parent/
 │   │   └── vaadin-button-flow-integration-tests/
 │   │       └── package.json
@@ -158,18 +157,17 @@ For the pilot we do this by hand for the four modules. An automated generator sc
 
 ## Setup Script
 
-`scripts/sync-flow-overlays.sh` is an idempotent Bash script (~50 lines, no Node dependency) that:
+`scripts/sync-flow-overlays.sh` is an idempotent Bash script (~60 lines, no Node dependency) that:
 
-1. Reads `flow-components-overlay/overlays.txt` (one relative path per line, e.g., `vaadin-button-flow-parent/vaadin-button-flow-integration-tests`).
-2. For each entry:
-   - **Source**: `flow-components-overlay/<path>/package.json` — must exist; errors out if not.
-   - **Target**: `flow-components/<path>/package.json` — created as a symlink.
-   - **Symlink target value**: a relative path from the target's directory back into the overlay tree.
+1. Scans `flow-components-overlay/` for every `vaadin-*-flow-parent/vaadin-*-flow-integration-tests/package.json`. Each matching file is an overlay source.
+2. For each:
+   - **Target**: `flow-components/<parent>/<it>/package.json` — created as a symlink.
+   - **Symlink target value**: `../../../flow-components-overlay/<parent>/<it>/package.json` — three `..` segments from the target dir back to the workspace root.
 3. If the target already exists and is a symlink pointing at the correct path → skip silently.
 4. If the target exists and is something else (regular file, wrong symlink) → fail loudly with the path; do not overwrite. The user resolves manually.
 5. Prints one status line per overlay (`created` / `up-to-date` / `error`).
 
-Bash, not Node, so it runs without any installed deps — important because it must succeed before `npm install`.
+Bash, not Node, so it runs without any installed deps — important because it must succeed before `npm install`. No list file is needed: the overlay tree itself is the source of truth — adding a new overlay is purely a matter of creating `flow-components-overlay/<parent>/<it>/package.json`. To exclude a module from npm workspaces, add it to the negative-glob list in the root `package.json`.
 
 ## Gradle Integration
 
@@ -259,14 +257,7 @@ Four IT modules in the first cut, each chosen to exercise a distinct case:
 | `vaadin-combo-box-flow-integration-tests` | Overlay/dropdown — combo-box pulls in `@vaadin/overlay`, `@vaadin/item`, `@vaadin/lit-renderer`. Tests deeper transitives. |
 | `vaadin-date-picker-flow-integration-tests` | Cross-component transitive — `@vaadin/date-picker` itself depends on `@vaadin/button` and others. Confirms npm resolves transitive deps to workspace members and that a local edit to button surfaces in date-picker without re-install. |
 
-`flow-components-overlay/overlays.txt`:
-
-```
-vaadin-button-flow-parent/vaadin-button-flow-integration-tests
-vaadin-grid-flow-parent/vaadin-grid-flow-integration-tests
-vaadin-combo-box-flow-parent/vaadin-combo-box-flow-integration-tests
-vaadin-date-picker-flow-parent/vaadin-date-picker-flow-integration-tests
-```
+No list file is needed — `sync-flow-overlays.sh` discovers the four overlay directories by scanning `flow-components-overlay/`.
 
 ## Verification
 
@@ -292,9 +283,8 @@ After implementation, the pilot is considered successful when:
 ## Implementation Steps
 
 1. Add `flow-components-overlay/README.md` describing the directory's purpose.
-2. Add `flow-components-overlay/overlays.txt` with the four pilot module paths.
-3. Hand-author the four overlay `package.json` files, deriving deps from each IT module's Java `@NpmPackage` annotations.
-4. Write `scripts/sync-flow-overlays.sh` and verify it is idempotent.
+2. Hand-author the four overlay `package.json` files, deriving deps from each IT module's Java `@NpmPackage` annotations.
+3. Write `scripts/sync-flow-overlays.sh` and verify it is idempotent.
 5. Extend `gradle/flow-components.gradle.kts` with the `syncFlowOverlays` task and wire it into `:flow-components:install`.
 6. Extend root `build.gradle.kts` to apply the Node plugin and add the `npmInstall` task, wired into the root aggregate `install`.
 7. Add the workspace root `package.json` with the two workspace globs.

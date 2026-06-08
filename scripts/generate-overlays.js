@@ -1,8 +1,11 @@
 #!/usr/bin/env node
 // Generates minimal overlay package.json files for flow-components IT modules
 // whose primary component declares @NpmPackage annotations matching @vaadin/*
-// packages present in web-components/packages/. Non-destructive: never modifies
-// files for modules already listed in overlays.txt.
+// packages present in web-components/packages/.
+//
+// Discovers IT modules by scanning flow-components/ directly. Skips any module
+// that already has an overlay file under flow-components-overlay/.
+// Non-destructive: never overwrites an existing overlay file.
 
 'use strict';
 
@@ -42,19 +45,23 @@ function buildOverlayPackageJson(componentName, packages) {
   return JSON.stringify(obj, null, 2) + '\n';
 }
 
-// Module list from spec §Scope (all "included" modules; pilot is excluded by
-// reading existing overlays.txt entries).
-const CANDIDATE_MODULES = [
-  'accordion', 'app-layout', 'aura-theme', 'avatar', 'badge', 'board',
-  'breadcrumbs', 'card', 'charts', 'checkbox', 'confirm-dialog',
-  'context-menu', 'crud', 'custom-field', 'dashboard', 'date-time-picker',
-  'details', 'dialog', 'field-highlighter', 'form-layout', 'grid-pro',
-  'icons', 'list-box', 'login', 'lumo-theme', 'map', 'markdown',
-  'master-detail-layout', 'menu-bar', 'messages', 'notification',
-  'ordered-layout', 'popover', 'progress-bar', 'radio-button', 'renderer',
-  'rich-text-editor', 'select', 'side-nav', 'slider', 'split-layout',
-  'tabs', 'text-field', 'time-picker', 'upload', 'virtual-list',
-];
+// Returns short component names for every IT module present in
+// `flow-components/`. Match pattern: `vaadin-<name>-flow-parent/vaadin-<name>-flow-integration-tests/`.
+function discoverItModules(flowDir) {
+  const names = new Set();
+  if (!fs.existsSync(flowDir)) return [];
+  for (const entry of fs.readdirSync(flowDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const parentMatch = entry.name.match(/^vaadin-(.+)-flow-parent$/);
+    if (!parentMatch) continue;
+    const name = parentMatch[1];
+    const itDir = path.join(flowDir, entry.name, `vaadin-${name}-flow-integration-tests`);
+    if (fs.existsSync(itDir) && fs.statSync(itDir).isDirectory()) {
+      names.add(name);
+    }
+  }
+  return [...names].sort();
+}
 
 function readJavaSources(componentSrcDir) {
   if (!fs.existsSync(componentSrcDir)) return '';
@@ -72,19 +79,10 @@ function readJavaSources(componentSrcDir) {
   return out.join('\n');
 }
 
-function readExistingOverlays(overlaysFile) {
-  if (!fs.existsSync(overlaysFile)) return [];
-  return fs.readFileSync(overlaysFile, 'utf8')
-    .split('\n')
-    .map((l) => l.trim())
-    .filter((l) => l && !l.startsWith('#'));
-}
-
 function main({ workspaceRoot }) {
   const flowDir = path.join(workspaceRoot, 'flow-components');
   const webPackagesDir = path.join(workspaceRoot, 'web-components', 'packages');
   const overlayDir = path.join(workspaceRoot, 'flow-components-overlay');
-  const overlaysFile = path.join(overlayDir, 'overlays.txt');
 
   if (!fs.existsSync(webPackagesDir)) {
     process.stderr.write(`ERROR: web-components/packages/ not found at ${webPackagesDir}\n  Did you run: git submodule update --init ?\n`);
@@ -95,14 +93,15 @@ function main({ workspaceRoot }) {
     process.exit(1);
   }
 
-  const existing = new Set(readExistingOverlays(overlaysFile));
+  const candidates = discoverItModules(flowDir);
   const added = [];
   const skipped = [];
   const alreadyCovered = [];
 
-  for (const name of CANDIDATE_MODULES) {
-    const relPath = `vaadin-${name}-flow-parent/vaadin-${name}-flow-integration-tests`;
-    if (existing.has(relPath)) {
+  for (const name of candidates) {
+    const outDir = path.join(overlayDir, `vaadin-${name}-flow-parent`, `vaadin-${name}-flow-integration-tests`);
+    const outFile = path.join(outDir, 'package.json');
+    if (fs.existsSync(outFile)) {
       alreadyCovered.push(name);
       continue;
     }
@@ -117,21 +116,9 @@ function main({ workspaceRoot }) {
       continue;
     }
 
-    const outDir = path.join(overlayDir, `vaadin-${name}-flow-parent`, `vaadin-${name}-flow-integration-tests`);
-    const outFile = path.join(outDir, 'package.json');
     fs.mkdirSync(outDir, { recursive: true });
     fs.writeFileSync(outFile, buildOverlayPackageJson(name, localPkgs));
     added.push({ name, packages: localPkgs });
-  }
-
-  // Append new entries to overlays.txt, preserving existing lines.
-  if (added.length > 0) {
-    const current = fs.existsSync(overlaysFile) ? fs.readFileSync(overlaysFile, 'utf8') : '';
-    const trailing = current.endsWith('\n') || current === '' ? '' : '\n';
-    const additions = added
-      .map((a) => `vaadin-${a.name}-flow-parent/vaadin-${a.name}-flow-integration-tests`)
-      .join('\n') + '\n';
-    fs.writeFileSync(overlaysFile, current + trailing + additions);
   }
 
   console.log(`Added:           ${added.length}`);
@@ -146,6 +133,7 @@ module.exports = {
   extractVaadinPackages,
   filterToLocalPackages,
   buildOverlayPackageJson,
+  discoverItModules,
   main,
 };
 

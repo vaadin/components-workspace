@@ -1,28 +1,38 @@
 #!/usr/bin/env bash
 # Emits a space-separated list of overlay short component names to stdout.
 #
+# Discovers overlays by scanning the overlay directory for every
+# vaadin-<name>-flow-parent/vaadin-<name>-flow-integration-tests/package.json
+# and extracting <name>.
+#
 # Env overrides:
 #   COMPONENTS  — space-separated short names to keep (e.g. "grid date-picker")
 #
-# Reads flow-components-overlay/overlays.txt by default; first positional
-# argument overrides the source. Entries starting with # and blank lines are
-# ignored. Lines that don't match the vaadin-*-flow-integration-tests pattern
-# are dropped.
+# First positional argument overrides the overlay directory
+# (default flow-components-overlay).
 
 set -euo pipefail
 
 COMPONENTS="${COMPONENTS:-}"
-SOURCE="${1:-flow-components-overlay/overlays.txt}"
+SOURCE_DIR="${1:-flow-components-overlay}"
 
-if [ ! -f "$SOURCE" ]; then
-  echo "::error::Overlay list not found at $SOURCE" >&2
+if [ ! -d "$SOURCE_DIR" ]; then
+  echo "::error::Overlay directory not found at $SOURCE_DIR" >&2
   exit 1
 fi
 
-all_names=$(tr -d '\r' < "$SOURCE" \
-  | grep -vE '^[[:space:]]*(#|$)' \
-  | sed -n 's,.*vaadin-\([^/]*\)-flow-integration-tests$,\1,p' \
-  || true)
+# Discover all overlay short names, sorted alphabetically. nullglob lets the
+# loop skip cleanly when no overlays exist.
+shopt -s nullglob
+all_names=""
+for pkg in "$SOURCE_DIR"/vaadin-*-flow-parent/vaadin-*-flow-integration-tests/package.json; do
+  it_dir="${pkg%/package.json}"
+  it_name="${it_dir##*/}"               # vaadin-<name>-flow-integration-tests
+  short="${it_name#vaadin-}"
+  short="${short%-flow-integration-tests}"
+  all_names+="$short"$'\n'
+done
+all_names=$(printf '%s' "$all_names" | sort -u)
 
 if [ -z "$COMPONENTS" ]; then
   printf '%s' "$all_names" | tr '\n' ' ' | sed 's/[[:space:]]*$//'

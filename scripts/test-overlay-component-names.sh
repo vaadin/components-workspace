@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tests scripts/overlay-component-names.sh against fixture overlay lists.
+# Tests scripts/overlay-component-names.sh against a fixture overlay tree.
 # Run from workspace root: bash scripts/test-overlay-component-names.sh
 
 set -euo pipefail
@@ -10,45 +10,47 @@ SCRIPT="$HERE/overlay-component-names.sh"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 pass() { echo "ok: $*"; }
 
-# Fixture overlays.txt with comments and blank lines.
-FIXTURE=$(mktemp)
-trap 'rm -f "$FIXTURE"' EXIT
-cat > "$FIXTURE" <<'EOF'
-# comment line
-vaadin-button-flow-parent/vaadin-button-flow-integration-tests
+# Fixture overlay directory with four IT modules.
+FIXTURE=$(mktemp -d)
+trap 'rm -rf "$FIXTURE"' EXIT
 
-vaadin-grid-flow-parent/vaadin-grid-flow-integration-tests
-vaadin-combo-box-flow-parent/vaadin-combo-box-flow-integration-tests
-vaadin-date-picker-flow-parent/vaadin-date-picker-flow-integration-tests
-EOF
+make_overlay() {
+  local name="$1"
+  local dir="$FIXTURE/vaadin-${name}-flow-parent/vaadin-${name}-flow-integration-tests"
+  mkdir -p "$dir"
+  echo '{}' > "$dir/package.json"
+}
+make_overlay button
+make_overlay grid
+make_overlay combo-box
+make_overlay date-picker
 
-# Case 1: default — all four names.
+# Case 1: default — all four names, sorted.
 out=$(bash "$SCRIPT" "$FIXTURE")
-[ "$out" = "button grid combo-box date-picker" ] || fail "default: got [$out]"
-pass "default lists all overlay names"
+[ "$out" = "button combo-box date-picker grid" ] || fail "default: got [$out]"
+pass "default lists all overlay names, sorted"
 
 # Case 2: COMPONENTS filter — narrow to two.
 out=$(COMPONENTS="grid date-picker" bash "$SCRIPT" "$FIXTURE")
-[ "$out" = "grid date-picker" ] || fail "filter: got [$out]"
+[ "$out" = "date-picker grid" ] || fail "filter: got [$out]"
 pass "COMPONENTS filter narrows the set"
 
 # Case 3: COMPONENTS filter with a name not in overlays — drops it.
 out=$(COMPONENTS="grid bogus" bash "$SCRIPT" "$FIXTURE")
 [ "$out" = "grid" ] || fail "filter-with-bogus: got [$out]"
-pass "COMPONENTS filter drops names not in overlays.txt"
+pass "COMPONENTS filter drops names not in overlay tree"
 
-# Case 4: missing source file — exit 1.
-if bash "$SCRIPT" /tmp/this-does-not-exist >/dev/null 2>&1; then
+# Case 4: missing source directory — exit 1.
+if bash "$SCRIPT" /tmp/this-does-not-exist-$$ >/dev/null 2>&1; then
   fail "missing source should exit non-zero"
 fi
 pass "missing source exits non-zero"
 
-# Case 5: CRLF line endings — names still extracted cleanly (no \r artifacts).
-CRLF_FIXTURE=$(mktemp)
-printf 'vaadin-button-flow-parent/vaadin-button-flow-integration-tests\r\nvaadin-grid-flow-parent/vaadin-grid-flow-integration-tests\r\n' > "$CRLF_FIXTURE"
-out=$(bash "$SCRIPT" "$CRLF_FIXTURE")
-rm -f "$CRLF_FIXTURE"
-[ "$out" = "button grid" ] || fail "CRLF: got [$out]"
-pass "CRLF line endings stripped before parsing"
+# Case 5: empty overlay directory — empty output, exit 0.
+EMPTY=$(mktemp -d)
+trap 'rm -rf "$FIXTURE" "$EMPTY"' EXIT
+out=$(bash "$SCRIPT" "$EMPTY")
+[ -z "$out" ] || fail "empty: got [$out]"
+pass "empty overlay directory yields empty output"
 
 echo "All tests pass."

@@ -44,17 +44,19 @@ A new Node script at `scripts/generate-overlays.js` automates the authoring step
 
 ### Inputs
 
-- `flow-components/` submodule root (scans Java source for `@NpmPackage`)
+- `flow-components/` submodule root (discovers candidate IT modules by directory scan; reads their primary component Java source for `@NpmPackage`)
 - `web-components/packages/` (determines which `@vaadin/*` names are available locally)
-- `flow-components-overlay/overlays.txt` (read existing entries; append new ones; skip already-covered modules)
+- `flow-components-overlay/` (existing overlay files mark which IT modules are already covered)
 
-### Algorithm (per IT module not yet in overlay)
+### Algorithm (per IT module not yet covered)
 
-1. Locate the main component Java source: `flow-components/vaadin-<name>-flow-parent/vaadin-<name>-flow/src/**/*.java`
-2. Extract all `@NpmPackage(value = "@vaadin/<pkg>", …)` annotations.
-3. Filter to those where `web-components/packages/<pkg>/` exists.
-4. If no matching packages: skip this module (add to a skip log, not to `overlays.txt`).
-5. Write `flow-components-overlay/vaadin-<name>-flow-parent/vaadin-<name>-flow-integration-tests/package.json`:
+1. Discover candidates: scan `flow-components/` for every `vaadin-<name>-flow-parent/vaadin-<name>-flow-integration-tests/` directory.
+2. Skip if an overlay file already exists at `flow-components-overlay/vaadin-<name>-flow-parent/vaadin-<name>-flow-integration-tests/package.json`.
+3. Locate the main component Java source: `flow-components/vaadin-<name>-flow-parent/vaadin-<name>-flow/src/**/*.java`.
+4. Extract all `@NpmPackage(value = "@vaadin/<pkg>", …)` annotations.
+5. Filter to those where `web-components/packages/<pkg>/` exists.
+6. If no matching packages: skip this module (it appears in the skip log only).
+7. Write `flow-components-overlay/vaadin-<name>-flow-parent/vaadin-<name>-flow-integration-tests/package.json`:
 
 ```json
 {
@@ -62,26 +64,23 @@ A new Node script at `scripts/generate-overlays.js` automates the authoring step
   "version": "0.0.0",
   "private": true,
   "dependencies": {
-    "@vaadin/<pkg>": "file:../../../../../web-components/packages/<pkg>"
+    "@vaadin/<pkg>": "file:../../../web-components/packages/<pkg>"
   }
 }
 ```
 
 For modules with multiple direct packages (e.g. avatar has `@vaadin/avatar` and `@vaadin/avatar-group`), all are listed as `file:` deps.
 
-6. Append the module's relative path to `flow-components-overlay/overlays.txt`.
-
-The root `package.json` `workspaces` array does not need updating per module: the positive glob `flow-components/*-flow-parent/*-flow-integration-tests` automatically picks up any new module that appears in the submodule, and the negative-glob exclusions for `ai-components`, `renderer`, and `spreadsheet` are stable. A new excluded module would need to be added to that exclusion list manually.
+The root `package.json` `workspaces` array does not need updating per module: the positive glob `flow-components/*-flow-parent/*-flow-integration-tests` automatically picks up any new module that appears in the submodule. To exclude a module from npm workspaces (typically because it has no overlay and its Flow-generated leftover `package.json` would trip up the install), add a negative-glob entry there manually.
 
 ### Output
 
-- Updated `flow-components-overlay/overlays.txt` (new entries appended, existing entries preserved).
 - New `package.json` files under `flow-components-overlay/` (one per included module).
 - A summary to stdout: modules added, modules skipped, modules already covered.
 
 ### Non-destructive
 
-The script never modifies existing overlay `package.json` files (pilot modules keep their hand-authored/expanded content). If a module is already in `overlays.txt`, it is skipped entirely.
+The script never modifies existing overlay `package.json` files (pilot modules keep their hand-authored/expanded content). If a module already has an overlay file, it is skipped entirely.
 
 ## File Path Convention
 
@@ -122,7 +121,7 @@ To fully validate the result locally before pushing, run the full build:
 
 This runs in order: `syncFlowOverlays` (materializes all new symlinks), `npm install` at the workspace root (workspace deps for `web-components`, `web-components/packages/*`, and every IT module member), and `mvn -DskipTests install` in flow-components (installs all `com.vaadin:*` JARs into local Maven repo). web-components is source-published TypeScript/Lit; no separate yarn or build step is needed for it from the outer Gradle build. The compiled Maven JARs are required for WAR packaging; the source TypeScript under `web-components/packages/*/src/` is consumed directly by `flow:build-frontend`'s Vite step at IT runtime.
 
-`scripts/sync-flow-overlays.sh` needs no changes — it already reads the full `overlays.txt`.
+`scripts/sync-flow-overlays.sh` discovers overlays by scanning `flow-components-overlay/` for every `vaadin-*-flow-parent/vaadin-*-flow-integration-tests/package.json`, so it picks up newly generated entries automatically.
 
 ## CI Verification Strategy
 
@@ -156,17 +155,17 @@ A green `Collect results` job on the full run is the acceptance gate.
 
 ## Rollout Sequence
 
-1. Run `scripts/generate-overlays.js` — produces all new overlay `package.json` files and updated `overlays.txt`.
+1. Run `scripts/generate-overlays.js` — produces all new overlay `package.json` files under `flow-components-overlay/`.
 2. Run `npm install --ignore-scripts` — updates `package-lock.json`.
 3. Run `./gradlew build --no-daemon` — verifies symlinks materialize cleanly, npm resolves correctly, web-components TypeScript compiles, and all flow-components Maven modules install successfully.
-4. Commit: `flow-components-overlay/`, updated `overlays.txt`, updated `package-lock.json`.
+4. Commit: `flow-components-overlay/` (new files) and updated `package-lock.json`.
 5. Push to `verify-ci` branch — triggers CI (which runs `./gradlew build` in the install job, covering both submodule builds).
 6. Stage 1 targeted run: pass → proceed. Fail → debug one component at a time.
 7. Stage 2 full run: pass → merge to `main`.
 
 ## Success Criteria
 
-- `overlays.txt` contains entries for all included modules (46 net new + 4 existing = 50 total).
+- `flow-components-overlay/` contains overlay directories for all included modules (46 net new + 4 existing = 50 total — minus any module whose Java source has no `@vaadin/*` `@NpmPackage` match, such as `renderer`).
 - `npm ls --workspaces` shows no `UNMET DEPENDENCY` warnings for any overlay member.
 - `./gradlew install` from a clean state (after `git submodule update --init`) completes without errors.
 - Full CI run on `verify-ci` is green (all IT shards pass, no `package-war` failures).
@@ -176,9 +175,9 @@ A green `Collect results` job on the full run is the acceptance gate.
 | Artifact | Role |
 |---|---|
 | `2026-06-04-it-npm-workspace-design.md` | Foundational architecture; `Workspace root` section updated to reflect that workspace members live at submodule paths (via symlinks), matched by a positive glob plus negative-glob exclusions |
-| `flow-components-overlay/overlays.txt` | Extended by generator; consumed by `sync-flow-overlays.sh` (unchanged) |
-| `scripts/sync-flow-overlays.sh` | Unchanged — already reads the full `overlays.txt` |
-| `scripts/generate-overlays.js` | New — automates overlay authoring |
+| `flow-components-overlay/` | Source of truth for overlay membership: each `vaadin-<name>-flow-parent/vaadin-<name>-flow-integration-tests/package.json` directly represents an overlay (no separate list file) |
+| `scripts/sync-flow-overlays.sh` | Discovers overlays by scanning `flow-components-overlay/` |
+| `scripts/generate-overlays.js` | Automates overlay authoring; discovers candidate IT modules by scanning `flow-components/` and skips ones that already have an overlay file |
 | `.github/workflows/validation.yml` | Verification pipeline (unchanged) |
 | `package.json` (workspace root) | Updated once with a positive glob over `flow-components/*-flow-parent/*-flow-integration-tests` and negative-glob exclusions for `ai-components`, `renderer`, `spreadsheet` |
 | `package-lock.json` | Updated after generator run |

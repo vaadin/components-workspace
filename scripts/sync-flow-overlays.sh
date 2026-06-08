@@ -1,32 +1,28 @@
 #!/usr/bin/env bash
 # Materializes workspace-tracked flow-components overlay files as symlinks
 # inside the flow-components/ submodule. Idempotent.
+#
+# Discovers overlays by scanning flow-components-overlay/ for every
+# vaadin-<name>-flow-parent/vaadin-<name>-flow-integration-tests/package.json.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OVERLAY_DIR="$ROOT/flow-components-overlay"
 SUBMODULE_DIR="$ROOT/flow-components"
-OVERLAYS_FILE="$OVERLAY_DIR/overlays.txt"
 
-if [[ ! -f "$OVERLAYS_FILE" ]]; then
-    echo "error: $OVERLAYS_FILE not found" >&2
+if [[ ! -d "$OVERLAY_DIR" ]]; then
+    echo "error: $OVERLAY_DIR not found" >&2
     exit 1
 fi
 
 status=0
-while IFS= read -r rel_path || [[ -n "$rel_path" ]]; do
-    # Skip blank lines and comments.
-    [[ -z "$rel_path" || "$rel_path" =~ ^# ]] && continue
+shopt -s nullglob
+for source_file in "$OVERLAY_DIR"/vaadin-*-flow-parent/vaadin-*-flow-integration-tests/package.json; do
+    rel_path="${source_file#"$OVERLAY_DIR/"}"
+    rel_path="${rel_path%/package.json}"
 
-    source_file="$OVERLAY_DIR/$rel_path/package.json"
     target_file="$SUBMODULE_DIR/$rel_path/package.json"
     target_dir="$(dirname "$target_file")"
-
-    if [[ ! -f "$source_file" ]]; then
-        echo "error: missing overlay source: $source_file" >&2
-        status=1
-        continue
-    fi
 
     if [[ ! -d "$target_dir" ]]; then
         echo "error: missing submodule target dir: $target_dir" >&2
@@ -34,10 +30,9 @@ while IFS= read -r rel_path || [[ -n "$rel_path" ]]; do
         continue
     fi
 
-    # Compute symlink target as a relative path from target_dir back to source_file.
-    # Each rel_path has the form <parent>/<it-module>, i.e., 2 segments. From
-    # flow-components/<parent>/<it-module>/ we need 3 ..'s to reach workspace root,
-    # then into flow-components-overlay/<parent>/<it-module>/package.json.
+    # Each rel_path has the form <parent>/<it-module> (2 segments). From
+    # flow-components/<parent>/<it-module>/ we need 3 ..'s to reach workspace
+    # root, then into flow-components-overlay/<parent>/<it-module>/package.json.
     link_target="../../../flow-components-overlay/$rel_path/package.json"
 
     if [[ -L "$target_file" ]]; then
@@ -60,6 +55,6 @@ while IFS= read -r rel_path || [[ -n "$rel_path" ]]; do
 
     ln -s "$link_target" "$target_file"
     echo "created: $target_file -> $link_target"
-done < "$OVERLAYS_FILE"
+done
 
 exit $status

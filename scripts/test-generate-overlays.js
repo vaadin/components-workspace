@@ -5,7 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { extractVaadinPackages, filterToLocalPackages, buildOverlayPackageJson } = require('./generate-overlays.js');
+const { extractVaadinPackages, filterToLocalPackages, buildOverlayPackageJson, discoverItModules } = require('./generate-overlays.js');
 
 test('extractVaadinPackages — single @vaadin annotation', () => {
   const src = '@NpmPackage(value = "@vaadin/accordion", version = "25.2.0-beta1")';
@@ -85,4 +85,23 @@ test('buildOverlayPackageJson — multiple deps, sorted', () => {
 test('buildOverlayPackageJson — output ends with trailing newline', () => {
   const content = buildOverlayPackageJson('accordion', ['@vaadin/accordion']);
   assert.equal(content.endsWith('\n'), true);
+});
+
+test('discoverItModules — finds short names from vaadin-<name>-flow-parent/vaadin-<name>-flow-integration-tests pairs', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'gen-overlays-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'vaadin-button-flow-parent/vaadin-button-flow-integration-tests'), { recursive: true });
+    fs.mkdirSync(path.join(tmp, 'vaadin-grid-flow-parent/vaadin-grid-flow-integration-tests'), { recursive: true });
+    // parent with no integration-tests subdir → skipped
+    fs.mkdirSync(path.join(tmp, 'vaadin-only-flow-parent/vaadin-only-flow'), { recursive: true });
+    // unrelated directory → skipped
+    fs.mkdirSync(path.join(tmp, 'docs'), { recursive: true });
+    assert.deepEqual(discoverItModules(tmp), ['button', 'grid']);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('discoverItModules — returns empty array when flowDir does not exist', () => {
+  assert.deepEqual(discoverItModules('/tmp/this-does-not-exist-' + Date.now()), []);
 });
