@@ -9,8 +9,14 @@
 const fs = require('fs');
 const path = require('path');
 
-function extractVaadinPackages(_javaSource) {
-  throw new Error('not implemented');
+function extractVaadinPackages(javaSource) {
+  const re = /@NpmPackage\s*\(\s*value\s*=\s*"(@vaadin\/[^"]+)"/g;
+  const found = new Set();
+  let m;
+  while ((m = re.exec(javaSource)) !== null) {
+    found.add(m[1]);
+  }
+  return [...found].sort();
 }
 
 function filterToLocalPackages(_packageNames, _webComponentsPackagesDir) {
