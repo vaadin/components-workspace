@@ -26,8 +26,20 @@ function filterToLocalPackages(packageNames, webComponentsPackagesDir) {
   });
 }
 
-function buildOverlayPackageJson(_componentName, _packages) {
-  throw new Error('not implemented');
+function buildOverlayPackageJson(componentName, packages) {
+  const sortedPackages = [...packages].sort();
+  const dependencies = {};
+  for (const pkg of sortedPackages) {
+    const shortName = pkg.replace(/^@vaadin\//, '');
+    dependencies[pkg] = `file:../../../web-components/packages/${shortName}`;
+  }
+  const obj = {
+    name: `@vaadin-flow-integration-tests/vaadin-${componentName}-flow-integration-tests`,
+    version: '0.0.0',
+    private: true,
+    dependencies,
+  };
+  return JSON.stringify(obj, null, 2) + '\n';
 }
 
 function main(_opts) {

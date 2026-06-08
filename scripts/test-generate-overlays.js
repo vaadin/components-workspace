@@ -5,7 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { extractVaadinPackages, filterToLocalPackages } = require('./generate-overlays.js');
+const { extractVaadinPackages, filterToLocalPackages, buildOverlayPackageJson } = require('./generate-overlays.js');
 
 test('extractVaadinPackages — single @vaadin annotation', () => {
   const src = '@NpmPackage(value = "@vaadin/accordion", version = "25.2.0-beta1")';
@@ -57,4 +57,32 @@ test('filterToLocalPackages — returns empty array when no matches', () => {
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+test('buildOverlayPackageJson — single dep', () => {
+  const content = buildOverlayPackageJson('accordion', ['@vaadin/accordion']);
+  const parsed = JSON.parse(content);
+  assert.equal(parsed.name, '@vaadin-flow-integration-tests/vaadin-accordion-flow-integration-tests');
+  assert.equal(parsed.version, '0.0.0');
+  assert.equal(parsed.private, true);
+  assert.deepEqual(parsed.dependencies, {
+    '@vaadin/accordion': 'file:../../../web-components/packages/accordion',
+  });
+});
+
+test('buildOverlayPackageJson — multiple deps, sorted', () => {
+  const content = buildOverlayPackageJson('avatar', ['@vaadin/avatar-group', '@vaadin/avatar']);
+  const parsed = JSON.parse(content);
+  assert.deepEqual(parsed.dependencies, {
+    '@vaadin/avatar': 'file:../../../web-components/packages/avatar',
+    '@vaadin/avatar-group': 'file:../../../web-components/packages/avatar-group',
+  });
+  // Deterministic key order in serialized output (alphabetical).
+  const depKeys = Object.keys(parsed.dependencies);
+  assert.deepEqual(depKeys, [...depKeys].sort());
+});
+
+test('buildOverlayPackageJson — output ends with trailing newline', () => {
+  const content = buildOverlayPackageJson('accordion', ['@vaadin/accordion']);
+  assert.equal(content.endsWith('\n'), true);
 });
