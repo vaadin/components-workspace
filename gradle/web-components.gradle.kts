@@ -19,7 +19,6 @@ tasks.register("test") {
     group = "verification"
 }
 
-tasks.named<Delete>("clean") {
-    description = "Removes node_modules left over from a prior `yarn install` inside the submodule."
-    delete(file("node_modules"))
+tasks.named("clean") {
+    description = "No-op — web-components has no build output to clean."
 }
