@@ -120,7 +120,7 @@ To fully validate the result locally before pushing, run the full build:
 ./gradlew build --no-daemon
 ```
 
-This runs in order: `syncFlowOverlays` (materializes all new symlinks), `npm install` (workspace deps), `yarn install + yarn build` in web-components (produces `packages/*/dist/`), and `mvn -DskipTests install` in flow-components (installs all `com.vaadin:*` JARs into local Maven repo). Both build outputs are required by the IT tests: the compiled Maven JARs for WAR packaging and the `dist/` bundles for `flow:build-frontend`.
+This runs in order: `syncFlowOverlays` (materializes all new symlinks), `npm install` at the workspace root (workspace deps for `web-components`, `web-components/packages/*`, and every IT module member), and `mvn -DskipTests install` in flow-components (installs all `com.vaadin:*` JARs into local Maven repo). web-components is source-published TypeScript/Lit; no separate yarn or build step is needed for it from the outer Gradle build. The compiled Maven JARs are required for WAR packaging; the source TypeScript under `web-components/packages/*/src/` is consumed directly by `flow:build-frontend`'s Vite step at IT runtime.
 
 `scripts/sync-flow-overlays.sh` needs no changes — it already reads the full `overlays.txt`.
 

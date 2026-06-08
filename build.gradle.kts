@@ -7,14 +7,6 @@ plugins {
 
 project(":web-components") {
     apply(plugin = "base")
-    apply(plugin = "com.github.node-gradle.node")
-    extensions.configure<com.github.gradle.node.NodeExtension> {
-        download.set(false)
-        nodeProjectDir.set(projectDir)
-        workDir.set(rootProject.layout.buildDirectory.dir("nodejs"))
-        npmWorkDir.set(rootProject.layout.buildDirectory.dir("npm"))
-        yarnWorkDir.set(rootProject.layout.buildDirectory.dir("yarn"))
-    }
 }
 
 apply(plugin = "com.github.node-gradle.node")
@@ -23,7 +15,6 @@ extensions.configure<com.github.gradle.node.NodeExtension> {
     nodeProjectDir.set(rootDir)
     workDir.set(layout.buildDirectory.dir("nodejs"))
     npmWorkDir.set(layout.buildDirectory.dir("npm"))
-    yarnWorkDir.set(layout.buildDirectory.dir("yarn"))
 }
 
 val npmInstall = tasks.named<NpmTask>("npmInstall") {
@@ -40,14 +31,6 @@ tasks.register("install") {
     description = "Installs dependencies for all subprojects."
     group = "build"
     dependsOn(":web-components:install", ":flow-components:install", npmInstall)
-}
-
-project(":web-components") {
-    afterEvaluate {
-        tasks.named("install") {
-            mustRunAfter(":npmInstall")
-        }
-    }
 }
 
 tasks.named("build") {

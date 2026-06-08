@@ -193,16 +193,12 @@ One new task at the workspace root (`build.gradle.kts`) for the actual npm insta
 ```kotlin
 import com.github.gradle.node.npm.task.NpmTask
 
-// (in the existing project(":web-components") { ... } configure block we already applied
-// the Node plugin to :web-components. The root project also needs it.)
-
 apply(plugin = "com.github.node-gradle.node")
 extensions.configure<com.github.gradle.node.NodeExtension> {
     download.set(false)
     nodeProjectDir.set(rootDir)
     workDir.set(layout.buildDirectory.dir("nodejs"))
     npmWorkDir.set(layout.buildDirectory.dir("npm"))
-    yarnWorkDir.set(layout.buildDirectory.dir("yarn"))
 }
 
 val npmInstall = tasks.named<NpmTask>("npmInstall") {
@@ -211,27 +207,18 @@ val npmInstall = tasks.named<NpmTask>("npmInstall") {
     dependsOn(":flow-components:syncFlowOverlays")
     inputs.file("package.json")
     inputs.file("package-lock.json")
+    inputs.file("flow-components/package.json")
     outputs.dir("node_modules")
 }
-
-tasks.named("install") {
-    dependsOn(npmInstall)
-}
-
-project(":web-components") {
-    afterEvaluate {
-        tasks.named("install") {
-            mustRunAfter(":npmInstall")
-        }
-    }
-}
 ```
+
+`:web-components:install` becomes a thin delegate to `:npmInstall` — web-components is a workspace member, so its dependencies are installed by the root npm install. No `YarnTask` is wired in; devs working inside `web-components/` still run `yarn …` directly within the submodule for the inner test/api-docs/dev sub-workspaces.
 
 After this change, `./gradlew install` runs:
 
 1. `:flow-components:syncFlowOverlays` — creates / verifies overlay symlinks.
-2. `npmInstall` — `npm install` at workspace root.
-3. `:web-components:install` — `yarn install` inside the web-components submodule (unchanged; for web-components devs' own workflow).
+2. `npmInstall` — `npm install` at workspace root (installs all workspace members, including `web-components`).
+3. `:web-components:install` — no-op (depends on `:npmInstall`).
 4. `:flow-components:install` — still the no-op Maven placeholder.
 
 The `inputs`/`outputs` declarations on `npmInstall` let Gradle skip it when `package.json` and `package-lock.json` haven't changed and `node_modules/` exists.

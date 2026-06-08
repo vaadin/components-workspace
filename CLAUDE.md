@@ -49,9 +49,9 @@ A Gradle build at the workspace root orchestrates both submodules behind a unifo
 
 | Command | What it does |
 |---|---|
-| `./gradlew install` | `yarn install` in web-components + Maven warm-up (no-op) in flow-components |
-| `./gradlew build` | web-components install + `mvn -DskipTests install` in flow-components |
-| `./gradlew test` | `yarn test` (changed packages) + `mvn test` |
+| `./gradlew install` | `npm install` at the workspace root (covers web-components, its `packages/*`, and every flow-components IT module — all workspace members) + Maven warm-up (no-op) in flow-components |
+| `./gradlew build` | install + `mvn -DskipTests install` in flow-components (web-components is source-published; no compile step) |
+| `./gradlew test` | `mvn test` (web-components tests run via `yarn test` inside the submodule directly) |
 | `./gradlew clean` | remove `node_modules/` + `mvn clean` |
 
 Use `./gradlew :web-components:<task>` or `./gradlew :flow-components:<task>` to target a single subproject. The submodules remain independently buildable from inside their own directories — the Gradle build is additive, not a replacement.

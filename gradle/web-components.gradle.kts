@@ -1,27 +1,25 @@
-import com.github.gradle.node.yarn.task.YarnTask
+// web-components is an npm workspace member of the outer workspace, so its
+// dependencies are installed by the root :npmInstall task. The submodule keeps
+// yarn-classic for its own internal dev workflow (run `yarn …` directly inside
+// `web-components/`); the outer Gradle build does not invoke yarn.
 
-tasks.register<YarnTask>("install") {
-    description = "Runs `yarn install` in the web-components submodule."
+tasks.register("install") {
+    description = "Delegates to the workspace-root npm install."
     group = "build"
-    args.set(listOf("install"))
-    inputs.file("package.json")
-    inputs.file("yarn.lock")
-    outputs.dir("node_modules")
+    dependsOn(":npmInstall")
 }
 
 tasks.named("build") {
-    description = "Build web-components — no-action; components are source-published. Triggers install."
+    description = "No-op — web-components is source-published. Triggers install."
     dependsOn("install")
 }
 
-tasks.register<YarnTask>("test") {
-    description = "Runs `yarn test` (default: changed packages only)."
+tasks.register("test") {
+    description = "No-op — run `yarn test` inside `web-components/` for the submodule's own test suite."
     group = "verification"
-    args.set(listOf("test"))
-    dependsOn("build")
 }
 
 tasks.named<Delete>("clean") {
-    description = "Removes node_modules in the web-components submodule."
+    description = "Removes node_modules left over from a prior `yarn install` inside the submodule."
     delete(file("node_modules"))
 }

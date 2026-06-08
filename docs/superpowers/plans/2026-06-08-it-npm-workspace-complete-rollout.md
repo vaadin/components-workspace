@@ -624,7 +624,7 @@ If `package-lock.json` is unchanged, the workspace globs aren't picking up the n
 **Files:**
 - None (read-only validation)
 
-This step performs the equivalent of what CI runs in the `install` job: materialize symlinks, npm install, web-components yarn build, and `mvn -DskipTests install` across all flow-components modules.
+This step performs the equivalent of what CI runs in the `install` job: materialize symlinks, root `npm install` (which covers `web-components` since it is a workspace member), and `mvn -DskipTests install` across all flow-components modules.
 
 - [ ] **Step 1: Verify Node version is ≤ 24 for the Maven step**
 
@@ -640,8 +640,8 @@ If 25.x: switch via `nvm use 24` or equivalent before continuing. (The generator
 ```
 Expected: green build in roughly 10–25 minutes. The build runs (in order):
   1. `:flow-components:syncFlowOverlays` — creates / updates symlinks for every new overlay entry. Output should show `created:` lines for new modules and `up-to-date:` for pilot.
-  2. `:npmInstall` — usually a no-op since Task 7 already ran `npm install`.
-  3. `:web-components:install` + yarn build — produces `web-components/packages/*/dist/`.
+  2. `:npmInstall` — usually a no-op since Task 7 already ran `npm install`. Installs `web-components`, `web-components/packages/*`, and every IT module as workspace members.
+  3. `:web-components:install` — no-op (delegates to `:npmInstall`). `:web-components:build` — also no-op (web-components is source-published TypeScript/Lit; no compile step).
   4. `:flow-components:install` — `mvn -DskipTests install` across all flow-components modules.
 
 - [ ] **Step 3: Confirm all new symlinks exist in the submodule**
