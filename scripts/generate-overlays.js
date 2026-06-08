@@ -86,6 +86,15 @@ function main({ workspaceRoot }) {
   const overlayDir = path.join(workspaceRoot, 'flow-components-overlay');
   const overlaysFile = path.join(overlayDir, 'overlays.txt');
 
+  if (!fs.existsSync(webPackagesDir)) {
+    process.stderr.write(`ERROR: web-components/packages/ not found at ${webPackagesDir}\n  Did you run: git submodule update --init ?\n`);
+    process.exit(1);
+  }
+  if (!fs.existsSync(flowDir)) {
+    process.stderr.write(`ERROR: flow-components/ not found at ${flowDir}\n  Did you run: git submodule update --init ?\n`);
+    process.exit(1);
+  }
+
   const existing = new Set(readExistingOverlays(overlaysFile));
   const added = [];
   const skipped = [];
