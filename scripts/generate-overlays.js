@@ -19,8 +19,11 @@ function extractVaadinPackages(javaSource) {
   return [...found].sort();
 }
 
-function filterToLocalPackages(_packageNames, _webComponentsPackagesDir) {
-  throw new Error('not implemented');
+function filterToLocalPackages(packageNames, webComponentsPackagesDir) {
+  return packageNames.filter((name) => {
+    const shortName = name.replace(/^@vaadin\//, '');
+    return fs.existsSync(path.join(webComponentsPackagesDir, shortName));
+  });
 }
 
 function buildOverlayPackageJson(_componentName, _packages) {
