@@ -188,6 +188,7 @@ Notable differences from the current `its` job:
 - `-DskipUnitTests` keeps the shard focused on ITs — the `unit` job already covers them, and re-running them per shard would inflate wall-clock.
 - `-Dvaadin.productionMode -Dvaadin.force.production.build=true` forces a production frontend build per module. This is the cost we are measuring.
 - **No `-Drelease`.** The common-WAR path passes `-Drelease` to suppress per-component IT modules in the reactor (the merged `integration-tests/` module subsumes them). Each `vaadin-<component>-flow-parent/pom.xml` declares its IT submodule inside a `default` profile activated by `<name>!release</name>`. Passing `-Drelease` deactivates that profile, removes the IT module from the reactor, and `-pl vaadin-X-flow-parent/vaadin-X-flow-integration-tests` then fails with "Could not find the selected project in the reactor". Modular mode wants the per-component IT modules in the reactor, so `-Drelease` must NOT be set. (The `unit` job's `mvn test -Drelease` is unaffected — it stays as is.)
+- **Workspace must include `web-components`' nested workspaces.** The original workspace setup listed only `web-components` and `web-components/packages/*` as outer-workspace members, but `web-components/package.json` itself declares nested workspaces (`test/*`, `packages/*`, `api-docs`, `dev`). With those nested members invisible to the outer workspace, npm install hoisted some packages to the workspace-root `node_modules/` while others landed in `web-components/node_modules/`. Vite running inside an IT module then resolved `@vaadin/*` correctly (workspace-root) but failed on transitive deps that npm had put in `web-components/node_modules/`. Fix: flatten the nested workspaces into the root `package.json` (`web-components/test/*`, `web-components/dev`, `web-components/api-docs`) so a single hoist tree covers everything. After this fix, only the workspace-root `node_modules/` (plus a small `flow-components/node_modules/` for `@types/*` non-hoistables) exists.
 - Report and screenshot upload paths gain `**` since reports now land in each module's own `target/`, not under a single synthetic `integration-tests/target/`. The `results` job's download step already uses `merge-multiple: true` so this transparently works for its consumer.
 
 ### Modified: `results` job
@@ -364,7 +365,8 @@ The PR is correct when:
 
 1. Rewrite `scripts/compute-it-matrix.sh` in place: read overlay names from stdin, LPT-pack by per-module `*IT.java` count, emit a `{shard, modules}` matrix.
 2. Rewrite `scripts/test-compute-it-matrix.sh` in place with the cases listed in §Verification step 1.
-3. Edit `.github/workflows/validation.yml`:
+3. Flatten `web-components`' nested workspaces into the root `package.json` (`web-components/test/*`, `web-components/dev`, `web-components/api-docs`); delete `package-lock.json` and re-run `npm install` so the lockfile regenerates with a single hoist tree. Without this, Vite running in an IT module sees split resolution (some deps at workspace root, others under `web-components/node_modules/`) and fails. See §Notable differences for context.
+4. Edit `.github/workflows/validation.yml`:
    - Delete the `package-war` job.
    - Delete the "Merge overlay ITs" step from `install`.
    - Update `Compute IT matrix` step to pipe overlay names into `scripts/compute-it-matrix.sh`.
@@ -374,10 +376,12 @@ The PR is correct when:
    - Add `setup-node@v6` with `node-version: '24'` to the `its` job (per-shard frontend builds need a pinned Node).
    - Update upload paths in `its` to use `flow-components/**/target/failsafe-reports/TEST-*.xml` and `flow-components/**/error-screenshots/`.
    - Update the dorny IT path in `results` to `failsafe-reports/**/TEST-*.xml` to match the new nested upload layout.
-4. Open the PR. The automatic `pull_request` run executes the new modular `validation.yml` against the PR HEAD — that's the data point for the modular variant.
-5. Push trivial commits to accumulate ≥3 PR runs.
-6. Collect ≥3 recent successful `main`-branch runs of the previous common-WAR `validation.yml` for the baseline. Fill in the PR description's comparison table.
-7. Reviewer sanity-checks the timing data and either approves the modular path or reverts via `git revert` on the merge commit.
+   - Add `flow-components/**/node_modules` to every cache path list (1 save + 4 restores) so any non-hoisted per-IT or `flow-components/node_modules/@types/*` content propagates from install to shards.
+5. Make `:web-components:install` a true no-op in `gradle/web-components.gradle.kts` (drop its `dependsOn(":npmInstall")`); the root `:install` task still triggers `:npmInstall` directly, so the workspace install happens exactly once.
+6. Open the PR. The automatic `pull_request` run executes the new modular `validation.yml` against the PR HEAD — that's the data point for the modular variant.
+7. Push trivial commits to accumulate ≥3 PR runs.
+8. Collect ≥3 recent successful `main`-branch runs of the previous common-WAR `validation.yml` for the baseline. Fill in the PR description's comparison table.
+9. Reviewer sanity-checks the timing data and either approves the modular path or reverts via `git revert` on the merge commit.
 
 ## References
 

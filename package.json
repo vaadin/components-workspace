@@ -6,6 +6,9 @@
   "workspaces": [
     "web-components",
     "web-components/packages/*",
+    "web-components/test/*",
+    "web-components/dev",
+    "web-components/api-docs",
     "flow-components",
     "flow-components/*-flow-parent/*-flow-integration-tests",
     "!flow-components/vaadin-ai-components-flow-parent/vaadin-ai-components-flow-integration-tests",
