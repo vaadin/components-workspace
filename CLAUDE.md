@@ -49,9 +49,9 @@ A Gradle build at the workspace root orchestrates both submodules behind a unifo
 
 | Command | What it does |
 |---|---|
-| `./gradlew install` | `yarn install` in web-components + Maven warm-up (no-op) in flow-components |
-| `./gradlew build` | web-components install + `mvn -DskipTests install` in flow-components |
-| `./gradlew test` | `yarn test` (changed packages) + `mvn test` |
+| `./gradlew install` | `npm install` at the workspace root (covers web-components, its `packages/*`, and every flow-components IT module — all workspace members) + Maven warm-up (no-op) in flow-components |
+| `./gradlew build` | install + `mvn -DskipTests install` in flow-components (web-components is source-published; no compile step) |
+| `./gradlew test` | `mvn test` (web-components tests run via `yarn test` inside the submodule directly) |
 | `./gradlew clean` | remove `node_modules/` + `mvn clean` |
 
 Use `./gradlew :web-components:<task>` or `./gradlew :flow-components:<task>` to target a single subproject. The submodules remain independently buildable from inside their own directories — the Gradle build is additive, not a replacement.
@@ -62,13 +62,15 @@ flow-components currently requires Node ≤ 24 (Node 25 breaks `vaadin-charts-fl
 
 ### Integration-test npm workspace
 
-The workspace root also acts as an npm workspace. A pilot set of `flow-components` integration-test modules (`vaadin-button-flow-integration-tests`, `vaadin-grid-flow-integration-tests`, `vaadin-combo-box-flow-integration-tests`, `vaadin-date-picker-flow-integration-tests`) consume `@vaadin/*` packages directly from `web-components/packages/*` via workspace symlinks. The per-IT-module `package.json` files live in `flow-components-overlay/` and are symlinked into the submodule by `scripts/sync-flow-overlays.sh` (wired into `./gradlew :flow-components:syncFlowOverlays`, run automatically by `./gradlew install`).
+The workspace root also acts as an npm workspace. All `flow-components` integration-test modules whose primary component has a `@vaadin/*` peer in `web-components/packages/` consume those packages via workspace symlinks. The per-IT-module `package.json` files live in `flow-components-overlay/<parent>/<it>/` and are symlinked into the submodule by `scripts/sync-flow-overlays.sh` (wired into `./gradlew :flow-components:syncFlowOverlays`, run automatically by `./gradlew install`). The overlay tree itself is the source of truth — `sync-flow-overlays.sh` and `overlay-component-names.sh` discover entries by scanning the directory.
 
-To add a new IT module to the pilot:
+To add a new IT module:
 
-1. Append its path to `flow-components-overlay/overlays.txt`.
-2. Create the matching directory and `package.json` under `flow-components-overlay/`, listing the direct `@vaadin/*` deps from the module's Java `@NpmPackage` annotations as `file:` URLs into `web-components/packages/<name>`.
+1. Run `node scripts/generate-overlays.js` — it discovers IT modules under `flow-components/`, skips ones that already have an overlay, and writes new `package.json` files for any that have `@vaadin/*` `@NpmPackage` annotations matching `web-components/packages/`.
+2. Or hand-author `flow-components-overlay/vaadin-<name>-flow-parent/vaadin-<name>-flow-integration-tests/package.json`.
 3. Run `./gradlew install`.
+
+To exclude a non-overlaid IT module from the npm workspaces glob, add a `!`-prefixed entry to the `workspaces` array in the root `package.json`.
 
 See `docs/superpowers/specs/2026-06-04-it-npm-workspace-design.md`.
 

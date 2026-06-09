@@ -68,7 +68,6 @@ components-workspace/
 │
 ├── flow-components-overlay/                  # NEW — workspace-tracked overlay tree
 │   ├── README.md                             # one-paragraph orientation
-│   ├── overlays.txt                          # newline-separated list of overlay targets
 │   ├── vaadin-button-flow-parent/
 │   │   └── vaadin-button-flow-integration-tests/
 │   │       └── package.json
@@ -115,14 +114,20 @@ node_modules
   "private": true,
   "version": "0.0.0",
   "workspaces": [
+    "web-components",
     "web-components/packages/*",
-    "flow-components-overlay/*/*"
+    "flow-components",
+    "flow-components/*-flow-parent/*-flow-integration-tests",
+    "!flow-components/vaadin-ai-components-flow-parent/vaadin-ai-components-flow-integration-tests",
+    "!flow-components/vaadin-renderer-flow-parent/vaadin-renderer-flow-integration-tests",
+    "!flow-components/vaadin-spreadsheet-flow-parent/vaadin-spreadsheet-flow-integration-tests"
   ]
 }
 ```
 
-- `flow-components-overlay/*/*` matches `flow-components-overlay/<parent>/<it-module>`, where each IT module's `package.json` lives in the overlay tree.
-- The workspace glob points at the **overlay** path, not the submodule path. The symlinks inside the submodule are not workspace members — they are just files visible to Flow's plugin when Maven runs. npm reads workspace members from the overlay tree where the real files live.
+- The IT-module workspace members live at their **submodule** paths (`flow-components/<parent>/<it-module>`), not the overlay paths. npm reads each member's `package.json` through the symlink that the setup script materialises in the submodule path; the symlink points back to the real file in `flow-components-overlay/`. The overlay tree remains the source of truth — edits go there — but npm's view of "where this workspace lives" is the same path where the IT tests actually run.
+- The positive glob `flow-components/*-flow-parent/*-flow-integration-tests` matches every IT module under any `*-flow-parent` directory. The three negative-glob entries exclude IT modules without overlays (`ai-components`, `renderer`, `spreadsheet`) — their leftover Flow-generated `package.json` files have no `name`, which would otherwise trigger `EDUPLICATEWORKSPACE`. npm supports `!`-prefixed negative globs in the `workspaces` array since npm 7.
+- `web-components`, `web-components/packages/*`, and `flow-components` cover the two submodule roots plus the web-components package set.
 
 ### Per-IT-module (example: date-picker)
 
@@ -141,29 +146,28 @@ node_modules
 
 - Names use a `@vaadin-flow-integration-tests/*` scope so they cannot collide with real `@vaadin/*` packages.
 - `private: true` + `version: 0.0.0` makes accidental publishing impossible.
-- The `file:` path is **relative to the overlay file's location** (three `..` segments back to workspace root, then into `web-components/packages/<name>`).
-- IT modules declare **only the direct `@vaadin/*` packages their Java sources reference via `@NpmPackage`**. Transitive deps resolve through the workspace automatically; we do not list them.
+- The `file:` path is three `..` segments back to workspace root, then into `web-components/packages/<name>`. The depth is the same whether resolved from the overlay path or the symlinked submodule path — both are 3 levels deep below the workspace root — so npm resolves `file:` URLs correctly from either viewpoint.
+- **Every** IT module overlay declares every `@vaadin/*` package present in `web-components/packages/` as a `file:` dependency, not just the IT module's primary component. This guarantees the entire `@vaadin/*` graph resolves to the local workspace, defending against version-mismatch fallbacks to the npm registry. Flow's maven plugin merges its own deps on top at build time; the existing `file:` URLs survive the merge unchanged.
 
 ### Discovery rule for dependencies
 
-For an IT module at `vaadin-X-flow-parent/vaadin-X-flow-integration-tests/`, grep the corresponding Java sources for `@NpmPackage(value = "@vaadin/...")`. The distinct values are the dependencies list. Their versions all match `25.2.0-beta1` (Lerna-synced across web-components).
+For an IT module at `vaadin-X-flow-parent/vaadin-X-flow-integration-tests/`, the existence of any matching `@NpmPackage(value = "@vaadin/...")` annotation whose value is also a directory under `web-components/packages/` qualifies the module for an overlay. Modules with no matching annotation (e.g., `renderer`, `ai-components`, `spreadsheet`) are skipped.
 
-For the pilot we do this by hand for the four modules. An automated generator script that derives these from annotations is a future-work item.
+When an overlay is written, its `dependencies` list every `@vaadin/<name>` package present in `web-components/packages/` as a `file:` URL — not only the ones the Java source mentions. The uniform deps list ensures the entire `@vaadin/*` graph (direct and transitive) resolves to the local workspace.
 
 ## Setup Script
 
-`scripts/sync-flow-overlays.sh` is an idempotent Bash script (~50 lines, no Node dependency) that:
+`scripts/sync-flow-overlays.sh` is an idempotent Bash script (~60 lines, no Node dependency) that:
 
-1. Reads `flow-components-overlay/overlays.txt` (one relative path per line, e.g., `vaadin-button-flow-parent/vaadin-button-flow-integration-tests`).
-2. For each entry:
-   - **Source**: `flow-components-overlay/<path>/package.json` — must exist; errors out if not.
-   - **Target**: `flow-components/<path>/package.json` — created as a symlink.
-   - **Symlink target value**: a relative path from the target's directory back into the overlay tree.
+1. Scans `flow-components-overlay/` for every `vaadin-*-flow-parent/vaadin-*-flow-integration-tests/package.json`. Each matching file is an overlay source.
+2. For each:
+   - **Target**: `flow-components/<parent>/<it>/package.json` — created as a symlink.
+   - **Symlink target value**: `../../../flow-components-overlay/<parent>/<it>/package.json` — three `..` segments from the target dir back to the workspace root.
 3. If the target already exists and is a symlink pointing at the correct path → skip silently.
 4. If the target exists and is something else (regular file, wrong symlink) → fail loudly with the path; do not overwrite. The user resolves manually.
 5. Prints one status line per overlay (`created` / `up-to-date` / `error`).
 
-Bash, not Node, so it runs without any installed deps — important because it must succeed before `npm install`.
+Bash, not Node, so it runs without any installed deps — important because it must succeed before `npm install`. No list file is needed: the overlay tree itself is the source of truth — adding a new overlay is purely a matter of creating `flow-components-overlay/<parent>/<it>/package.json`. To exclude a module from npm workspaces, add it to the negative-glob list in the root `package.json`.
 
 ## Gradle Integration
 
@@ -187,16 +191,12 @@ One new task at the workspace root (`build.gradle.kts`) for the actual npm insta
 ```kotlin
 import com.github.gradle.node.npm.task.NpmTask
 
-// (in the existing project(":web-components") { ... } configure block we already applied
-// the Node plugin to :web-components. The root project also needs it.)
-
 apply(plugin = "com.github.node-gradle.node")
 extensions.configure<com.github.gradle.node.NodeExtension> {
     download.set(false)
     nodeProjectDir.set(rootDir)
     workDir.set(layout.buildDirectory.dir("nodejs"))
     npmWorkDir.set(layout.buildDirectory.dir("npm"))
-    yarnWorkDir.set(layout.buildDirectory.dir("yarn"))
 }
 
 val npmInstall = tasks.named<NpmTask>("npmInstall") {
@@ -205,27 +205,20 @@ val npmInstall = tasks.named<NpmTask>("npmInstall") {
     dependsOn(":flow-components:syncFlowOverlays")
     inputs.file("package.json")
     inputs.file("package-lock.json")
+    inputs.file("flow-components/package.json")
     outputs.dir("node_modules")
 }
-
-tasks.named("install") {
-    dependsOn(npmInstall)
-}
-
-project(":web-components") {
-    afterEvaluate {
-        tasks.named("install") {
-            mustRunAfter(":npmInstall")
-        }
-    }
-}
 ```
+
+`:web-components:install` becomes a thin delegate to `:npmInstall` — web-components is a workspace member, so its dependencies are installed by the root npm install. No `YarnTask` is wired in; devs working inside `web-components/` still run `yarn …` directly within the submodule for the inner test/api-docs/dev sub-workspaces.
+
+A `.npmrc` at the workspace root sets `ignore-scripts=true`. This is required because web-components' `postinstall: patch-package` references packages (`@web/rollup-plugin-html`, `@web/test-runner-visual-regression`, `lerna`) that live in web-components' inner yarn-workspaces (`dev/`, `test/`). The outer npm workspace does not recurse into those, so patch-package can't find the packages and fails. The patches only matter for upstream `dev:build` (the gh-pages playground build) and `test-runner-visual-regression`, neither of which runs from this workspace. Devs running `yarn` directly inside `web-components/` still apply the patches normally — yarn does not honour npm's `ignore-scripts`.
 
 After this change, `./gradlew install` runs:
 
 1. `:flow-components:syncFlowOverlays` — creates / verifies overlay symlinks.
-2. `npmInstall` — `npm install` at workspace root.
-3. `:web-components:install` — `yarn install` inside the web-components submodule (unchanged; for web-components devs' own workflow).
+2. `npmInstall` — `npm install` at workspace root (installs all workspace members, including `web-components`).
+3. `:web-components:install` — no-op (depends on `:npmInstall`).
 4. `:flow-components:install` — still the no-op Maven placeholder.
 
 The `inputs`/`outputs` declarations on `npmInstall` let Gradle skip it when `package.json` and `package-lock.json` haven't changed and `node_modules/` exists.
@@ -264,14 +257,7 @@ Four IT modules in the first cut, each chosen to exercise a distinct case:
 | `vaadin-combo-box-flow-integration-tests` | Overlay/dropdown — combo-box pulls in `@vaadin/overlay`, `@vaadin/item`, `@vaadin/lit-renderer`. Tests deeper transitives. |
 | `vaadin-date-picker-flow-integration-tests` | Cross-component transitive — `@vaadin/date-picker` itself depends on `@vaadin/button` and others. Confirms npm resolves transitive deps to workspace members and that a local edit to button surfaces in date-picker without re-install. |
 
-`flow-components-overlay/overlays.txt`:
-
-```
-vaadin-button-flow-parent/vaadin-button-flow-integration-tests
-vaadin-grid-flow-parent/vaadin-grid-flow-integration-tests
-vaadin-combo-box-flow-parent/vaadin-combo-box-flow-integration-tests
-vaadin-date-picker-flow-parent/vaadin-date-picker-flow-integration-tests
-```
+No list file is needed — `sync-flow-overlays.sh` discovers the four overlay directories by scanning `flow-components-overlay/`.
 
 ## Verification
 
@@ -297,9 +283,8 @@ After implementation, the pilot is considered successful when:
 ## Implementation Steps
 
 1. Add `flow-components-overlay/README.md` describing the directory's purpose.
-2. Add `flow-components-overlay/overlays.txt` with the four pilot module paths.
-3. Hand-author the four overlay `package.json` files, deriving deps from each IT module's Java `@NpmPackage` annotations.
-4. Write `scripts/sync-flow-overlays.sh` and verify it is idempotent.
+2. Hand-author the four overlay `package.json` files, deriving deps from each IT module's Java `@NpmPackage` annotations.
+3. Write `scripts/sync-flow-overlays.sh` and verify it is idempotent.
 5. Extend `gradle/flow-components.gradle.kts` with the `syncFlowOverlays` task and wire it into `:flow-components:install`.
 6. Extend root `build.gradle.kts` to apply the Node plugin and add the `npmInstall` task, wired into the root aggregate `install`.
 7. Add the workspace root `package.json` with the two workspace globs.

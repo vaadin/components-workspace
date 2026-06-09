@@ -6,8 +6,11 @@
   "workspaces": [
     "web-components",
     "web-components/packages/*",
-    "flow-components-overlay/*/*",
-    "flow-components"
+    "flow-components",
+    "flow-components/*-flow-parent/*-flow-integration-tests",
+    "!flow-components/vaadin-ai-components-flow-parent/vaadin-ai-components-flow-integration-tests",
+    "!flow-components/vaadin-renderer-flow-parent/vaadin-renderer-flow-integration-tests",
+    "!flow-components/vaadin-spreadsheet-flow-parent/vaadin-spreadsheet-flow-integration-tests"
   ],
   "devDependencies": {
     "@types/node": "^25.9.1",
