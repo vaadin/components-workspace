@@ -4,11 +4,9 @@
 
 **Goal:** Replace the common-WAR sharding in `.github/workflows/validation.yml` with module-based Maven sharding, so each ≤12-shard matrix entry runs `mvn verify -am -pl <module-list>` against a subset of overlay IT modules instead of a `-Dit.test=<class-list>` filter on a single synthetic merged module.
 
-**Architecture:** Drop the `package-war` job entirely; the `install` job's matrix step pipes overlay short names into the rewritten `scripts/compute-it-matrix.sh` that LPT bin-packs modules by `*IT.java` file count and emits `modules` (comma-separated paths) per shard; the `its` job consumes that matrix and runs one Maven reactor invocation per shard with `-am` so cross-module deps resolve. `scripts/sync-flow-overlays.sh` is extended to symlink per-IT `node_modules` to the workspace-root `node_modules` so `flow-maven-plugin`'s `build-frontend` finds the hoisted deps. No CI consumer of `flow-components/scripts/mergeITs.js` in the new workflow. Evaluation procedure (see spec §Evaluation) compares PR runs of the new modular workflow against recent main-branch runs of the previous common-WAR workflow.
+**Architecture:** Drop the `package-war` job entirely; the `install` job's matrix step pipes overlay short names into the rewritten `scripts/compute-it-matrix.sh` that LPT bin-packs modules by `*IT.java` file count and emits `modules` (comma-separated paths) per shard; the `its` job consumes that matrix and runs one Maven reactor invocation per shard with `-am` so cross-module deps resolve. No CI consumer of `flow-components/scripts/mergeITs.js` in the new workflow. Evaluation procedure (see spec §Evaluation) compares PR runs of the new modular workflow against recent main-branch runs of the previous common-WAR workflow.
 
 > **Note (added 2026-06-09 after first PR push):** An earlier version of this plan introduced `-modular` sibling scripts because the spec assumed the PR's automatic `pull_request` run would use `main`'s workflow file. That was wrong — `pull_request` events use the PR head's workflow. The siblings have been folded back into the canonical paths; this plan reflects the corrected design.
->
-> **Note (added 2026-06-09 after second PR push):** Two further fixes were required after the first push exposed them on CI. (1) `-Drelease` deactivates the `default` profile in `vaadin-<name>-flow-parent/pom.xml` that declares the IT submodule, so `mvn verify -am -pl <IT module path>` fails with "Could not find the selected project in the reactor". Solution: drop `-Drelease` from the IT shard mvn invocation. (2) `flow-maven-plugin`'s `build-frontend` scans for `@JsModule` paths under `<IT-module>/node_modules/` after running its own `npm install`, but the npm workspace hoists every member's deps to `<workspace-root>/node_modules`, so the per-IT `node_modules` is empty and Flow fails with "Failed to find the following imports in the `node_modules` tree". Solution: extend `scripts/sync-flow-overlays.sh` to symlink each IT module's `node_modules` to the workspace-root `node_modules`. Both fixes are folded into the relevant tasks below.
 
 **Tech Stack:** Bash 5 (scripts), GitHub Actions (workflow YAML), Maven 3 + Failsafe + jetty-maven-plugin (shard execution), `jq` (matrix sanity-checks in tests).
 
@@ -317,144 +315,6 @@ compute-it-matrix.sh now reads overlay short names from stdin and emits
 {shard, modules} entries via Longest-Processing-Time bin-packing on
 per-module *IT.java counts. Replaces the previous merged-tree walk that
 emitted {shard, tests} for the common-WAR sharding path.
-
-Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
-EOF
-)"
-```
-
----
-
-## Task 1b: Extend `sync-flow-overlays.sh` to manage per-IT `node_modules` symlinks
-
-**Files:**
-- Modify: `scripts/sync-flow-overlays.sh`
-
-`flow-maven-plugin`'s `build-frontend` looks at `<IT-module>/node_modules/` to find `@JsModule` paths. With the npm workspace hoisting deps to the workspace-root `node_modules`, no per-IT `node_modules` gets created — the scan fails. Fix: extend the overlay sync script to materialize a `node_modules` symlink at each IT module pointing three levels up to the workspace-root `node_modules`. The chain `<IT>/node_modules → <workspace-root>/node_modules → @vaadin/<pkg> → web-components/packages/<pkg>` resolves cleanly.
-
-### Steps
-
-- [ ] **Step 1b.1: Refactor the existing per-overlay loop into a small helper, then add a second symlink per overlay.**
-
-Open `scripts/sync-flow-overlays.sh`. The current script has one loop body that creates the `package.json` symlink. Refactor that body into a helper `link_or_verify <target_file> <link_target>` that handles idempotency (up-to-date if symlink already correct, error if non-symlink in the way), then call it twice per overlay — once for `package.json`, once for `node_modules`.
-
-Final script content:
-
-```bash
-#!/usr/bin/env bash
-# Materializes workspace-tracked flow-components overlay files as symlinks
-# inside the flow-components/ submodule. Idempotent.
-#
-# For each overlay <parent>/<it-module>, creates two symlinks inside the
-# submodule:
-#   1. package.json → ../../../flow-components-overlay/<parent>/<it-module>/package.json
-#   2. node_modules → ../../../node_modules
-#
-# The node_modules symlink redirects Flow's per-module frontend lookup at
-# `<it-module>/node_modules/...` to the workspace-root node_modules where
-# npm hoists every workspace member's deps. Without it, flow-maven-plugin's
-# `build-frontend` goal runs `npm install` inside the IT module (no-op in a
-# workspace member), then fails the subsequent pre-bundle scan with
-# "Failed to find the following imports in the `node_modules` tree".
-#
-# Discovers overlays by scanning flow-components-overlay/ for every
-# vaadin-<name>-flow-parent/vaadin-<name>-flow-integration-tests/package.json.
-set -euo pipefail
-
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-OVERLAY_DIR="$ROOT/flow-components-overlay"
-SUBMODULE_DIR="$ROOT/flow-components"
-
-if [[ ! -d "$OVERLAY_DIR" ]]; then
-    echo "error: $OVERLAY_DIR not found" >&2
-    exit 1
-fi
-
-status=0
-
-# Create or verify a single symlink. Idempotent: leaves an existing symlink
-# alone if it already points at link_target, errors out if the file exists
-# but is something else.
-link_or_verify() {
-    local target_file=$1 link_target=$2
-
-    if [[ -L "$target_file" ]]; then
-        local existing
-        existing="$(readlink "$target_file")"
-        if [[ "$existing" == "$link_target" ]]; then
-            echo "up-to-date: $target_file"
-            return 0
-        fi
-        echo "error: $target_file is a symlink pointing at $existing (expected $link_target); not overwriting" >&2
-        return 1
-    fi
-
-    if [[ -e "$target_file" ]]; then
-        echo "error: $target_file exists and is not a symlink; not overwriting" >&2
-        return 1
-    fi
-
-    ln -s "$link_target" "$target_file"
-    echo "created: $target_file -> $link_target"
-}
-
-shopt -s nullglob
-for source_file in "$OVERLAY_DIR"/vaadin-*-flow-parent/vaadin-*-flow-integration-tests/package.json; do
-    rel_path="${source_file#"$OVERLAY_DIR/"}"
-    rel_path="${rel_path%/package.json}"
-
-    target_dir="$SUBMODULE_DIR/$rel_path"
-    if [[ ! -d "$target_dir" ]]; then
-        echo "error: missing submodule target dir: $target_dir" >&2
-        status=1
-        continue
-    fi
-
-    # Each rel_path has the form <parent>/<it-module> (2 segments). From
-    # flow-components/<parent>/<it-module>/ three ..'s reach workspace root.
-    link_or_verify "$target_dir/package.json" \
-        "../../../flow-components-overlay/$rel_path/package.json" || status=1
-    link_or_verify "$target_dir/node_modules" "../../../node_modules" || status=1
-done
-
-exit $status
-```
-
-- [ ] **Step 1b.2: Run locally and inspect.**
-
-```bash
-bash scripts/sync-flow-overlays.sh
-```
-
-Expected: on a clean checkout, two `created: ...` lines per overlay (one for `package.json`, one for `node_modules`). On a re-run, two `up-to-date: ...` lines per overlay.
-
-If a local IT module already has a `node_modules` directory left over from a prior Maven build, the script will report `error: ... exists and is not a symlink`. That's fine — it's a local artifact. CI starts from a clean checkout and won't hit this.
-
-- [ ] **Step 1b.3: Verify the redirect works for at least one IT module.**
-
-```bash
-ls flow-components/vaadin-button-flow-parent/vaadin-button-flow-integration-tests/node_modules/@vaadin/button/
-```
-
-Expected: lists files from `web-components/packages/button/` via the chain `<IT>/node_modules → <root>/node_modules → @vaadin/button → web-components/packages/button`.
-
-- [ ] **Step 1b.4: Commit.**
-
-```bash
-git add scripts/sync-flow-overlays.sh
-git commit -m "$(cat <<'EOF'
-fix(overlays): symlink IT-module node_modules to workspace root
-
-flow-maven-plugin's build-frontend goal runs `npm install` inside each
-IT module and then scans <module>/node_modules/ for the @JsModule paths
-declared in Java sources. In the npm-workspace setup the per-module
-package.json is a workspace member, so npm install in that directory
-walks up to the workspace root, installs there, and creates no per-IT
-node_modules. Flow's subsequent scan then fails with "Failed to find
-the following imports in the `node_modules` tree".
-
-Fix: create a node_modules symlink at each IT module pointing three
-levels up to the workspace-root node_modules.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 EOF
