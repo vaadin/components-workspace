@@ -211,7 +211,7 @@ jobs:
     needs: [install]
     if: needs.install.outputs.it-matrix != '' && fromJson(needs.install.outputs.it-matrix).include[0] != null
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
     env:
       TB_LICENSE: ${{ secrets.TB_LICENSE }}
     strategy:
@@ -229,6 +229,11 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
           cache: 'maven'
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
 
       - name: Restore install cache
         uses: actions/cache/restore@v5
@@ -379,11 +384,11 @@ jobs:
 
       - name: Publish IT results
         id: it-dorny
-        if: hashFiles('failsafe-reports/TEST-*.xml') != ''
+        if: hashFiles('failsafe-reports/**/TEST-*.xml') != ''
         uses: dorny/test-reporter@a43b3a5f7366b97d083190328d2c652e1a8b6aa2
         with:
           name: Integration Tests
-          path: failsafe-reports/TEST-*.xml
+          path: failsafe-reports/**/TEST-*.xml
           reporter: java-junit
           list-tests: ${{ env.has_failures == 'true' && 'failed' || 'all' }}
           fail-on-error: 'false'
