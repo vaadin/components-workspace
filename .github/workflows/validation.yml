@@ -59,6 +59,7 @@ jobs:
             node_modules
             web-components/node_modules
             web-components/.yarn
+            flow-components/**/node_modules
             flow-components/vaadin-charts-flow-parent/vaadin-charts-flow-svg-generator/src/main/resources/META-INF/frontend/generated
 
       - name: Workspace install
@@ -75,6 +76,7 @@ jobs:
             node_modules
             web-components/node_modules
             web-components/.yarn
+            flow-components/**/node_modules
             flow-components/vaadin-charts-flow-parent/vaadin-charts-flow-svg-generator/src/main/resources/META-INF/frontend/generated
 
       - name: Compute IT matrix
@@ -124,6 +126,7 @@ jobs:
             node_modules
             web-components/node_modules
             web-components/.yarn
+            flow-components/**/node_modules
             flow-components/vaadin-charts-flow-parent/vaadin-charts-flow-svg-generator/src/main/resources/META-INF/frontend/generated
           fail-on-cache-miss: true
 
@@ -180,6 +183,7 @@ jobs:
             node_modules
             web-components/node_modules
             web-components/.yarn
+            flow-components/**/node_modules
             flow-components/vaadin-charts-flow-parent/vaadin-charts-flow-svg-generator/src/main/resources/META-INF/frontend/generated
           fail-on-cache-miss: true
 
@@ -244,6 +248,7 @@ jobs:
             node_modules
             web-components/node_modules
             web-components/.yarn
+            flow-components/**/node_modules
             flow-components/vaadin-charts-flow-parent/vaadin-charts-flow-svg-generator/src/main/resources/META-INF/frontend/generated
           fail-on-cache-miss: true
 
