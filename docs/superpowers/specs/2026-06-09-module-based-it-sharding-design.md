@@ -321,7 +321,10 @@ The honest accounting of where time moves:
 
 The bet: per-module frontend builds cost less now than the common WAR's monolithic Vite build, because (a) each module touches only its own components so the bundle graph is smaller, and (b) the workspace npm install has already populated `node_modules` so there is no `npm install` per module to re-incur. The evaluation confirms or falsifies this.
 
-The risk: if the per-module Vite build has a flat overhead (parser warm-up, plugin init, etc.) that doesn't scale down with bundle size, then N modules × flat-overhead > 1 module × big-overhead. The decision rule (>10% tolerance) gives modular some headroom for this without strictly requiring it to win.
+The risks:
+
+- **Per-module Vite/Flow flat overhead.** If the per-module frontend build has a flat overhead (parser warm-up, plugin init, etc.) that doesn't scale down with bundle size, then N modules × flat-overhead > 1 module × big-overhead. The decision rule (>10% tolerance) gives modular some headroom for this without strictly requiring it to win.
+- **Per-module Jetty start/stop cost.** Common-WAR runs one `jetty:start-war` per shard; modular runs one per module in the shard. Each Jetty boot loads the Vaadin/Spring runtime, which typically costs several seconds. With ~4 modules per shard at the 12-shard cap, this is tens of seconds added per shard — small relative to the IT phase itself, but worth measuring. If the eval shows it dominates, §Future Work documents a concrete mitigation (per-shard scoped `mergeITs.js`) that recovers the one-Jetty-per-shard property without re-introducing a global `package-war` job.
 
 ## Verification
 
@@ -348,6 +351,7 @@ The PR is correct when:
 
 ## Future Work
 
+- **Per-shard scoped `mergeITs.js`.** If evaluation shows per-module Jetty start/stop dominates, recover the one-Jetty-per-shard property without re-introducing the global `package-war` job. Each shard's matrix entry would carry the component short names (not module paths); the shard's first step runs `node scripts/mergeITs.js <names>` to build a scoped `integration-tests/` module for just its components, then runs one `mvn -pl integration-tests jetty:start-war failsafe:integration-test jetty:stop failsafe:verify` cycle. Scoped WAR build runs in parallel across shards; frontend graph per shard is smaller than the global common WAR. The matrix script's contract changes from "modules per shard" to "component names per shard" — the LPT bin-packing logic is identical, only the leaf payload differs.
 - **Frontend-build cache across shards.** If evaluation shows per-module Vite cost dominates, populate a shared `flow-components/**/target/frontend/generated/` cache in `install` and restore it in each shard. Requires per-module key fragments since module frontends differ.
 - **Historical-timing LPT.** Once a few weeks of modular runs accumulate, swap IT class count for historical wall-clock as the LPT input. Closer match to actual per-shard cost than class count alone.
 - **`merge_group` trigger.** Currently the PR runs the common-WAR baseline and the merge-queue (if enabled later) would too. Adding modular under `merge_group` is a follow-up after the eval lands.
