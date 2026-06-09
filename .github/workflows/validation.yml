@@ -84,7 +84,7 @@ jobs:
         run: |
           names=$(COMPONENTS="$COMPONENTS" bash scripts/overlay-component-names.sh)
           echo "Overlay names: $names"
-          matrix=$(echo "$names" | bash scripts/compute-it-matrix-modular.sh)
+          matrix=$(echo "$names" | bash scripts/compute-it-matrix.sh)
           echo "$matrix" | jq .
           {
             echo 'value<<EOF'
@@ -272,7 +272,7 @@ jobs:
         run: |
           cd flow-components && mvn verify -am \
             -pl "$SHARD_MODULES" \
-            -Drun-it -Drelease \
+            -Drun-it \
             -Dvaadin.productionMode -Dvaadin.force.production.build=true \
             -Dfailsafe.forkCount=4 \
             -Dcom.vaadin.testbench.Parameters.testsInParallel=2 \
