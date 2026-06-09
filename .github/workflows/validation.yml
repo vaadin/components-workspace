@@ -77,18 +77,14 @@ jobs:
             web-components/.yarn
             flow-components/vaadin-charts-flow-parent/vaadin-charts-flow-svg-generator/src/main/resources/META-INF/frontend/generated
 
-      - name: Merge overlay ITs into integration-tests/
+      - name: Compute IT matrix
+        id: matrix
         env:
           COMPONENTS: ${{ inputs.components }}
         run: |
           names=$(COMPONENTS="$COMPONENTS" bash scripts/overlay-component-names.sh)
-          echo "Merging ITs for: $names"
-          cd flow-components && node scripts/mergeITs.js $names
-
-      - name: Compute IT matrix
-        id: matrix
-        run: |
-          matrix=$(bash scripts/compute-it-matrix.sh)
+          echo "Overlay names: $names"
+          matrix=$(echo "$names" | bash scripts/compute-it-matrix-modular.sh)
           echo "$matrix" | jq .
           {
             echo 'value<<EOF'
@@ -210,104 +206,9 @@ jobs:
           retention-days: 1
           if-no-files-found: ignore
 
-  package-war:
-    name: Package WAR
-    needs: install
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    env:
-      TB_LICENSE: ${{ secrets.TB_LICENSE }}
-    outputs:
-      war-cache-key: ${{ steps.warkey.outputs.value }}
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          submodules: recursive
-          fetch-depth: 1
-
-      - name: Setup JDK 21
-        uses: actions/setup-java@v5
-        with:
-          java-version: '21'
-          distribution: 'temurin'
-          cache: 'maven'
-
-      - name: Setup Node
-        uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-
-      - name: Restore install cache
-        uses: actions/cache/restore@v5
-        with:
-          key: ${{ needs.install.outputs.cache-key }}
-          path: |
-            ~/.m2/repository/com/vaadin
-            node_modules
-            web-components/node_modules
-            web-components/.yarn
-            flow-components/vaadin-charts-flow-parent/vaadin-charts-flow-svg-generator/src/main/resources/META-INF/frontend/generated
-          fail-on-cache-miss: true
-
-      - name: Sync overlay symlinks
-        run: bash scripts/sync-flow-overlays.sh
-
-      - name: Install TestBench license
-        if: env.TB_LICENSE != ''
-        run: |
-          mkdir -p ~/.vaadin
-          user="${TB_LICENSE%%/*}"
-          key="${TB_LICENSE#*/}"
-          echo "{\"username\":\"${user}\",\"proKey\":\"${key}\"}" > ~/.vaadin/proKey
-
-      - name: Merge overlay ITs into integration-tests/
-        env:
-          COMPONENTS: ${{ inputs.components }}
-        run: |
-          names=$(COMPONENTS="$COMPONENTS" bash scripts/overlay-component-names.sh)
-          cd flow-components && node scripts/mergeITs.js $names
-
-      - name: Compute WAR cache key
-        id: warkey
-        env:
-          KEY: ${{ runner.os }}-war-${{ hashFiles('flow-components/**/pom.xml', 'flow-components/integration-tests/src/test/java/**') }}-${{ github.sha }}
-        run: echo "value=$KEY" >> "$GITHUB_OUTPUT"
-
-      - name: Restore WAR cache
-        id: warcache
-        uses: actions/cache/restore@v5
-        with:
-          key: ${{ steps.warkey.outputs.value }}
-          path: |
-            flow-components/integration-tests/pom.xml
-            flow-components/integration-tests/target
-
-      - name: Package integration-tests WAR
-        if: steps.warcache.outputs.cache-hit != 'true'
-        run: |
-          cd flow-components && mvn package -pl integration-tests \
-            -Dvaadin.pnpm.enable -Drun-it -Drelease \
-            -Dvaadin.productionMode -Dvaadin.force.production.build=true \
-            -Dmaven.test.skip=true -DskipJetty -B -ntp
-
-      - name: Compile IT test sources
-        if: steps.warcache.outputs.cache-hit != 'true'
-        run: |
-          cd flow-components && mvn test-compile -pl integration-tests \
-            -Drun-it -DskipFrontend -DskipJetty -DskipUnitTests -B -ntp
-
-      - name: Save WAR cache
-        if: steps.warcache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
-        with:
-          key: ${{ steps.warkey.outputs.value }}
-          path: |
-            flow-components/integration-tests/pom.xml
-            flow-components/integration-tests/target
-
   its:
     name: IT ${{ matrix.shard }}
-    needs: [install, package-war]
+    needs: [install]
     if: needs.install.outputs.it-matrix != '' && fromJson(needs.install.outputs.it-matrix).include[0] != null
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -341,15 +242,6 @@ jobs:
             flow-components/vaadin-charts-flow-parent/vaadin-charts-flow-svg-generator/src/main/resources/META-INF/frontend/generated
           fail-on-cache-miss: true
 
-      - name: Restore WAR cache
-        uses: actions/cache/restore@v5
-        with:
-          key: ${{ needs.package-war.outputs.war-cache-key }}
-          path: |
-            flow-components/integration-tests/pom.xml
-            flow-components/integration-tests/target
-          fail-on-cache-miss: true
-
       - name: Sync overlay symlinks
         run: bash scripts/sync-flow-overlays.sh
 
@@ -371,18 +263,18 @@ jobs:
 
       - name: Run IT shard
         env:
-          SHARD_TESTS: ${{ matrix.tests }}
+          SHARD_MODULES: ${{ matrix.modules }}
         run: |
-          cd flow-components && mvn -pl integration-tests -Drun-it \
-            jetty:start-war failsafe:integration-test jetty:stop failsafe:verify \
-            -Dvaadin.productionMode \
-            -DskipFrontend \
+          cd flow-components && mvn verify -am \
+            -pl "$SHARD_MODULES" \
+            -Drun-it -Drelease \
+            -Dvaadin.productionMode -Dvaadin.force.production.build=true \
             -Dfailsafe.forkCount=4 \
             -Dcom.vaadin.testbench.Parameters.testsInParallel=2 \
             -Dfailsafe.rerunFailingTestsCount=2 \
             -Dmaven.test.redirectTestOutputToFile=true \
             -Dtest.reuseDriver=true \
-            -Dit.test="$SHARD_TESTS" \
+            -DskipUnitTests \
             -B -ntp
 
       - name: Upload failsafe reports
@@ -390,7 +282,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: failsafe-reports-${{ steps.shardid.outputs.value }}
-          path: flow-components/integration-tests/target/failsafe-reports/TEST-*.xml
+          path: flow-components/**/target/failsafe-reports/TEST-*.xml
           retention-days: 1
           if-no-files-found: ignore
 
@@ -399,13 +291,13 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: error-screenshots-${{ steps.shardid.outputs.value }}
-          path: flow-components/integration-tests/error-screenshots/
+          path: flow-components/**/error-screenshots/
           retention-days: 5
           if-no-files-found: ignore
 
   results:
     name: Collect results
-    needs: [install, unit, wtr, package-war, its]
+    needs: [install, unit, wtr, its]
     if: always() && needs.install.result == 'success'
     runs-on: ubuntu-latest
     permissions:
