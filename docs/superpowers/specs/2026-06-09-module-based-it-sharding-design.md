@@ -188,6 +188,7 @@ Notable differences from the current `its` job:
 - `-DskipUnitTests` keeps the shard focused on ITs — the `unit` job already covers them, and re-running them per shard would inflate wall-clock.
 - `-Dvaadin.productionMode -Dvaadin.force.production.build=true` forces a production frontend build per module. This is the cost we are measuring.
 - **No `-Drelease`.** The common-WAR path passes `-Drelease` to suppress per-component IT modules in the reactor (the merged `integration-tests/` module subsumes them). Each `vaadin-<component>-flow-parent/pom.xml` declares its IT submodule inside a `default` profile activated by `<name>!release</name>`. Passing `-Drelease` deactivates that profile, removes the IT module from the reactor, and `-pl vaadin-X-flow-parent/vaadin-X-flow-integration-tests` then fails with "Could not find the selected project in the reactor". Modular mode wants the per-component IT modules in the reactor, so `-Drelease` must NOT be set. (The `unit` job's `mvn test -Drelease` is unaffected — it stays as is.)
+- **Per-IT `node_modules` symlink required.** `flow-maven-plugin`'s `build-frontend` goal looks for `@JsModule` paths under `<IT-module>/node_modules/...` after running its own `npm install`. The npm workspace at the workspace root hoists every member's deps to `<workspace-root>/node_modules`, so an IT module that runs `npm install` from inside its own directory creates no per-IT `node_modules` (npm walks up to the workspace root and operates there). Flow's subsequent scan then fails with "Failed to find the following imports in the `node_modules` tree". `scripts/sync-flow-overlays.sh` materializes a `node_modules` symlink at each IT module pointing three levels up to the workspace-root `node_modules`, redirecting Flow's lookup to where the deps actually live. The symlink survives Flow's npm install (npm doesn't replace an existing node_modules-shaped symlink in a workspace member). This is the same script that already materializes the per-IT `package.json` symlink, so the new symlink rides on the existing CI plumbing.
 - Report and screenshot upload paths gain `**` since reports now land in each module's own `target/`, not under a single synthetic `integration-tests/target/`. The `results` job's download step already uses `merge-multiple: true` so this transparently works for its consumer.
 
 ### Modified: `results` job
@@ -364,7 +365,8 @@ The PR is correct when:
 
 1. Rewrite `scripts/compute-it-matrix.sh` in place: read overlay names from stdin, LPT-pack by per-module `*IT.java` count, emit a `{shard, modules}` matrix.
 2. Rewrite `scripts/test-compute-it-matrix.sh` in place with the cases listed in §Verification step 1.
-3. Edit `.github/workflows/validation.yml`:
+3. Extend `scripts/sync-flow-overlays.sh` to also materialize a `node_modules` symlink at each IT module pointing three levels up to the workspace-root `node_modules`. The script stays idempotent.
+4. Edit `.github/workflows/validation.yml`:
    - Delete the `package-war` job.
    - Delete the "Merge overlay ITs" step from `install`.
    - Update `Compute IT matrix` step to pipe overlay names into `scripts/compute-it-matrix.sh`.
@@ -374,15 +376,14 @@ The PR is correct when:
    - Add `setup-node@v6` with `node-version: '24'` to the `its` job (per-shard frontend builds need a pinned Node).
    - Update upload paths in `its` to use `flow-components/**/target/failsafe-reports/TEST-*.xml` and `flow-components/**/error-screenshots/`.
    - Update the dorny IT path in `results` to `failsafe-reports/**/TEST-*.xml` to match the new nested upload layout.
-4. Open the PR. The automatic `pull_request` run executes the new modular `validation.yml` against the PR HEAD — that's the data point for the modular variant.
-5. Push trivial commits to accumulate ≥3 PR runs.
-6. Collect ≥3 recent successful `main`-branch runs of the previous common-WAR `validation.yml` for the baseline. Fill in the PR description's comparison table.
-7. Reviewer sanity-checks the timing data and either approves the modular path or reverts via `git revert` on the merge commit.
+5. Open the PR. The automatic `pull_request` run executes the new modular `validation.yml` against the PR HEAD — that's the data point for the modular variant.
+6. Push trivial commits to accumulate ≥3 PR runs.
+7. Collect ≥3 recent successful `main`-branch runs of the previous common-WAR `validation.yml` for the baseline. Fill in the PR description's comparison table.
+8. Reviewer sanity-checks the timing data and either approves the modular path or reverts via `git revert` on the merge commit.
 
 ## References
 
 - `docs/superpowers/specs/2026-06-04-ci-validation-design.md` — the workflow this spec modifies; its §Pipeline Shape, §Install Job, and §Results Job remain authoritative for the parts not touched here.
-- `docs/superpowers/specs/2026-06-04-it-npm-workspace-design.md`, `docs/superpowers/specs/2026-06-05-it-npm-workspace-complete-rollout.md` — the npm-workspace work that motivated this evaluation.
+- `docs/superpowers/specs/2026-06-04-it-npm-workspace-design.md`, `docs/superpowers/specs/2026-06-05-it-npm-workspace-complete-rollout.md` — the npm-workspace work that motivated this evaluation. The latter notes that the workspace was validated with the common-WAR production build path, where Flow's `build-frontend` operates on a synthetic merged module that has no overlay `package.json` — so the per-IT `node_modules` lookup problem this spec works around did not surface in that earlier validation.
 - `flow-components/scripts/mergeITs.js` — the upstream synthesizer that this spec stops calling from CI (it remains in the submodule for upstream use).
 - `flow-components/CLAUDE.md` §Building and Testing — the per-module Maven incantations that modular shards now invoke directly.
-- GitHub Actions docs on `pull_request` workflow source: workflow file is taken from the base branch for security; `workflow_dispatch` always runs the file from the dispatched ref. This asymmetry is what makes the same-SHA evaluation possible without a parallel workflow.
