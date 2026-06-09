@@ -4,7 +4,7 @@
 
 **Goal:** Replace the common-WAR sharding in `.github/workflows/validation.yml` with module-based Maven sharding, so each ≤12-shard matrix entry runs `mvn verify -am -pl <module-list>` against a subset of overlay IT modules instead of a `-Dit.test=<class-list>` filter on a single synthetic merged module.
 
-**Architecture:** Drop the `package-war` job entirely; the `install` job's matrix step pipes overlay short names into a rewritten `scripts/compute-it-matrix.sh` that LPT bin-packs modules by `*IT.java` file count and emits `modules` (comma-separated paths) per shard; the `its` job consumes that matrix and runs one Maven reactor invocation per shard with `-am` so cross-module deps resolve. No CI consumer of `flow-components/scripts/mergeITs.js`. Evaluation procedure (see spec §Evaluation) compares the PR-branch dispatch run to the automatic baseline run that uses `main`'s validation.yml against the same SHA.
+**Architecture:** Drop the `package-war` job entirely; the `install` job's matrix step pipes overlay short names into a **new** `scripts/compute-it-matrix-modular.sh` that LPT bin-packs modules by `*IT.java` file count and emits `modules` (comma-separated paths) per shard; the `its` job consumes that matrix and runs one Maven reactor invocation per shard with `-am` so cross-module deps resolve. The original `scripts/compute-it-matrix.sh` is left untouched so the automatic baseline run (which uses `main`'s `validation.yml` against the PR's working tree) keeps finding the merged-tree walker it depends on. No CI consumer of `flow-components/scripts/mergeITs.js` in the new workflow. Evaluation procedure (see spec §Evaluation) compares the PR-branch dispatch run to the automatic baseline run that uses `main`'s validation.yml against the same SHA.
 
 **Tech Stack:** Bash 5 (scripts), GitHub Actions (workflow YAML), Maven 3 + Failsafe + jetty-maven-plugin (shard execution), `jq` (matrix sanity-checks in tests).
 
@@ -12,11 +12,12 @@
 
 ---
 
-## Task 1: Rewrite `compute-it-matrix.sh` and its tests
+## Task 1: Add `compute-it-matrix-modular.sh` and its tests
 
 **Files:**
-- Modify: `scripts/test-compute-it-matrix.sh` (rewrite — interface changed from "walks merged tree" to "reads stdin")
-- Modify: `scripts/compute-it-matrix.sh` (rewrite — LPT bin-packing by per-module IT count)
+- Create: `scripts/test-compute-it-matrix-modular.sh` (new — tests the new script)
+- Create: `scripts/compute-it-matrix-modular.sh` (new — LPT bin-packing by per-module IT count)
+- Leave untouched: `scripts/compute-it-matrix.sh` and `scripts/test-compute-it-matrix.sh` (the baseline `pull_request` run uses `main`'s `validation.yml`, which references these originals; modifying them in place breaks the baseline because the workflow file is from `main` but the checkout is the PR's working tree).
 
 The new script signature:
 - Reads overlay short names (e.g. `grid date-picker`) from stdin as whitespace-separated tokens.
@@ -27,18 +28,19 @@ The new script signature:
 
 ### Steps
 
-- [ ] **Step 1.1: Replace the test file with the new test cases.**
+- [ ] **Step 1.1: Create the new test file.**
 
-Write `scripts/test-compute-it-matrix.sh` with this exact content:
+Write `scripts/test-compute-it-matrix-modular.sh` (a brand-new file alongside the existing `test-compute-it-matrix.sh`) with this exact content:
 
 ```bash
 #!/usr/bin/env bash
-# Tests scripts/compute-it-matrix.sh against synthetic flow-components fixture
-# trees. Run from workspace root: bash scripts/test-compute-it-matrix.sh
+# Tests scripts/compute-it-matrix-modular.sh against synthetic flow-components
+# fixture trees. Run from workspace root:
+#   bash scripts/test-compute-it-matrix-modular.sh
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
-SCRIPT="$HERE/compute-it-matrix.sh"
+SCRIPT="$HERE/compute-it-matrix-modular.sh"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 pass() { echo "ok: $*"; }
@@ -166,17 +168,17 @@ pass "MAX_SHARDS=0 rejected"
 echo "All tests pass."
 ```
 
-- [ ] **Step 1.2: Run tests; expect FAIL on at least the first case.**
+- [ ] **Step 1.2: Run tests; expect FAIL with a clear "script not found" error.**
 
 ```bash
-bash scripts/test-compute-it-matrix.sh
+bash scripts/test-compute-it-matrix-modular.sh
 ```
 
-Expected: `FAIL` (the existing script signature reads a directory positional arg, not stdin, and emits `tests:` keys instead of `modules:`). The exact case that fails first doesn't matter — what matters is that we see failures before changing the implementation.
+Expected: failure on the first case because `scripts/compute-it-matrix-modular.sh` doesn't exist yet. Bash typically reports `No such file or directory`. This confirms the new test file is correctly targeting the new (yet-to-be-created) script path and is independent from the existing test file.
 
-- [ ] **Step 1.3: Replace `scripts/compute-it-matrix.sh` with the new module-LPT version.**
+- [ ] **Step 1.3: Create `scripts/compute-it-matrix-modular.sh` (a new file).**
 
-Write `scripts/compute-it-matrix.sh` with this exact content:
+Write `scripts/compute-it-matrix-modular.sh` with this exact content:
 
 ```bash
 #!/usr/bin/env bash
@@ -283,35 +285,45 @@ json+=']}'
 echo "$json"
 ```
 
-- [ ] **Step 1.4: Run tests; expect PASS.**
+- [ ] **Step 1.4: Run the new test file; expect PASS.**
+
+```bash
+bash scripts/test-compute-it-matrix-modular.sh
+```
+
+Expected: `ok:` lines for every case, ending with `All tests pass.`
+
+- [ ] **Step 1.5: Run the existing test file; expect PASS (regression check).**
 
 ```bash
 bash scripts/test-compute-it-matrix.sh
 ```
 
-Expected: `ok:` lines for every case, ending with `All tests pass.`
+Expected: `ok:` lines for every case, ending with `All tests pass.` This confirms the existing common-WAR script and its test were not accidentally touched — important because the baseline `pull_request` run depends on the unchanged script.
 
-- [ ] **Step 1.5: Sanity-check against the real overlay set.**
+- [ ] **Step 1.6: Sanity-check the new script against the real overlay set.**
 
 ```bash
-bash scripts/overlay-component-names.sh | bash scripts/compute-it-matrix.sh | jq .
+bash scripts/overlay-component-names.sh | bash scripts/compute-it-matrix-modular.sh | jq .
 ```
 
 Expected: valid JSON with an `include` array whose entries each have `shard` (e.g. `"1/N"`) and `modules` (comma-separated `vaadin-<name>-flow-parent/vaadin-<name>-flow-integration-tests` paths). The shard count should be between 1 and 12.
 
 If this command errors with "IT module not found", the issue is that `overlay-component-names.sh` is emitting a short name that doesn't have a matching IT module under `flow-components/`. Check the overlay set in `flow-components-overlay/` against the flow-components submodule layout before continuing.
 
-- [ ] **Step 1.6: Commit.**
+- [ ] **Step 1.7: Commit.**
 
 ```bash
-git add scripts/compute-it-matrix.sh scripts/test-compute-it-matrix.sh
+git add scripts/compute-it-matrix-modular.sh scripts/test-compute-it-matrix-modular.sh
 git commit -m "$(cat <<'EOF'
-refactor(matrix): LPT-pack overlay modules instead of merged IT classes
+feat(matrix): add compute-it-matrix-modular.sh for module-based sharding
 
-compute-it-matrix.sh now reads overlay short names from stdin and emits
-{shard, modules} entries built by Longest-Processing-Time bin-packing on
-per-module *IT.java counts. Replaces the previous merged-tree walk that
-emitted {shard, tests} for the common-WAR sharding path.
+New script reads overlay short names from stdin and emits {shard, modules}
+entries via Longest-Processing-Time bin-packing on per-module *IT.java
+counts. Added as a sibling to the existing compute-it-matrix.sh so the
+baseline pull_request run -- which uses main's validation.yml against the
+PR's working tree -- keeps finding the unchanged merged-tree walker at
+its original path.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 EOF
@@ -347,9 +359,9 @@ Open `.github/workflows/validation.yml`. Find the step labeled `Merge overlay IT
 
 After deletion the `Workspace install` save-cache step is immediately followed by the `Compute IT matrix` step.
 
-- [ ] **Step 2.2: Update the "Compute IT matrix" step to feed overlay names through stdin.**
+- [ ] **Step 2.2: Update the "Compute IT matrix" step to feed overlay names through stdin into the new modular script.**
 
-Find the `Compute IT matrix` step in `install` (currently around lines 88–97). Replace its body so it derives names from `overlay-component-names.sh` (honouring the `components` input) and pipes them into the new `compute-it-matrix.sh`:
+Find the `Compute IT matrix` step in `install` (currently around lines 88–97). Replace its body so it derives names from `overlay-component-names.sh` (honouring the `components` input) and pipes them into `scripts/compute-it-matrix-modular.sh` (the new sibling — the original `compute-it-matrix.sh` stays untouched and continues to be referenced by `main`'s `validation.yml`):
 
 ```yaml
       - name: Compute IT matrix
@@ -359,7 +371,7 @@ Find the `Compute IT matrix` step in `install` (currently around lines 88–97).
         run: |
           names=$(COMPONENTS="$COMPONENTS" bash scripts/overlay-component-names.sh)
           echo "Overlay names: $names"
-          matrix=$(echo "$names" | bash scripts/compute-it-matrix.sh)
+          matrix=$(echo "$names" | bash scripts/compute-it-matrix-modular.sh)
           echo "$matrix" | jq .
           {
             echo 'value<<EOF'
@@ -520,8 +532,10 @@ Drop the package-war job and the global mergeITs.js call. Each its shard
 now runs `mvn verify -am -pl <modules>` directly against its assigned
 overlay IT modules. Upload paths scan per-module target/ trees.
 
-The install job now pipes overlay short names into compute-it-matrix.sh,
-which LPT-packs them into <=12 module-keyed shards.
+The install job now pipes overlay short names into the new
+compute-it-matrix-modular.sh, which LPT-packs them into <=12 module-keyed
+shards. The original compute-it-matrix.sh stays untouched so the baseline
+pull_request run (which uses main's validation.yml) keeps working.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 EOF
@@ -567,17 +581,18 @@ See `docs/superpowers/specs/2026-06-09-module-based-it-sharding-design.md` for t
 
 ## Changes
 
-- `scripts/compute-it-matrix.sh` rewritten to read overlay short names from stdin and LPT-pack modules into <=12 shards by *IT.java count.
-- `scripts/test-compute-it-matrix.sh` rewritten for the new contract (`include[].modules` instead of `include[].tests`).
+- New `scripts/compute-it-matrix-modular.sh`: reads overlay short names from stdin and LPT-packs modules into <=12 shards by *IT.java count.
+- New `scripts/test-compute-it-matrix-modular.sh`: tests for the new script.
+- `scripts/compute-it-matrix.sh` and `scripts/test-compute-it-matrix.sh` left untouched so the baseline `pull_request` run (which uses `main`'s `validation.yml` against the PR's working tree) keeps working.
 - `.github/workflows/validation.yml`:
   - `package-war` job and `mergeITs.js` invocation removed.
-  - `install`.`Compute IT matrix` pipes overlay names into the rewritten script.
+  - `install`.`Compute IT matrix` pipes overlay names into `scripts/compute-it-matrix-modular.sh`.
   - `its` runs `mvn verify -am -pl <modules>` per shard; upload paths scan per-module `target/`.
   - `results.needs` and `its.needs` no longer reference `package-war`.
 
 ## Evaluation procedure
 
-`pull_request` triggers run the workflow from the **base branch** (`main`), so the automatic checks on this PR continue to use the common-WAR `validation.yml`. To exercise the modular workflow on the same SHA, dispatch the workflow from this PR's branch via the Actions tab (`Run workflow` → branch = `proto/module-based-sharding` → leave inputs empty).
+`pull_request` triggers run the workflow **from the base branch** (`main`), while the checkout still pulls the PR's HEAD. So the automatic checks on this PR continue to execute `main`'s common-WAR `validation.yml` (which references the *unchanged* `scripts/compute-it-matrix.sh` and `flow-components/scripts/mergeITs.js`). To exercise the modular workflow on the same SHA, dispatch the workflow from this PR's branch via the Actions tab (`Run workflow` → branch = `proto/module-based-sharding` → leave inputs empty).
 
 Capture `>= 3 runs` of each (push trivial commits to re-trigger PR runs; dispatch repeatedly for modular runs). Then fill in the table below.
 
@@ -655,11 +670,12 @@ Once the PR description has at least three runs of each variant and a decision p
 This plan was checked against `docs/superpowers/specs/2026-06-09-module-based-it-sharding-design.md`:
 
 - **Spec §Overview & Goals** — Task 2 deletes `package-war` and the global merge step (goals 1, 2). Task 1 implements LPT bin-packing (goal 3). Task 3 documents the evaluation procedure (goal 4).
-- **Spec §Evaluation Procedure** — Reproduced verbatim in Task 3's PR description template.
+- **Spec §Non-Goals "No in-place edits to workflow-referenced scripts"** — Task 1 creates the new script as a sibling (`-modular` suffix) and explicitly leaves the original untouched. Task 1 step 1.5 runs the existing test as a regression check. Task 2 step 2.2 wires the new workflow to the new script path only.
+- **Spec §Evaluation Procedure** — Reproduced in Task 3's PR description template, with the working-tree-comes-from-PR clarification.
 - **Spec §Changes to `.github/workflows/validation.yml`** — Task 2 steps 2.1–2.6 each map to a bullet in this section. Step 2.4 covers the three sub-edits to `its` (drop `package-war` from `needs`, drop WAR-cache restore, replace run command). Step 2.5 covers the upload-path changes.
-- **Spec §Changes to `scripts/compute-it-matrix.sh`** — Task 1 step 1.3 contains the full rewritten script as specified.
-- **Spec §Verification step 1** — Task 1 step 1.4 runs the test suite which covers every case from the spec (missing root, empty input, missing module, single module, LPT distribution, MAX_SHARDS cap, env overrides, MAX_SHARDS=0 rejection, module without src/test/java).
+- **Spec §New script: `scripts/compute-it-matrix-modular.sh`** — Task 1 step 1.3 contains the full new-script content. Steps 1.1 and 1.3 explicitly create new files; the originals are not modified.
+- **Spec §Verification step 1** — Task 1 step 1.4 runs the new test suite which covers every case from the spec (missing root, empty input, missing module, single module, LPT distribution, MAX_SHARDS cap, env overrides, MAX_SHARDS=0 rejection, module without src/test/java). Step 1.5 also runs the original test for regression coverage.
 - **Spec §Verification step 2** — Task 3 steps 3.3–3.4 cover the workflow-behaviour checks (auto common-WAR run, dispatched modular run, scoped `components` input).
 - **Spec §Verification step 3** — Task 3 step 3.5 covers the evaluation-data capture.
 
-No placeholders or "implement later" steps. Every code/command block is the exact content to write or run. Type/key consistency: the matrix emits `modules:` in Task 1 and the `its` job consumes `${{ matrix.modules }}` in Task 2 — matched. The `SHARD_MODULES` env var in Task 2 step 2.4 matches the variable used in the `mvn` command.
+No placeholders or "implement later" steps. Every code/command block is the exact content to write or run. Type/key consistency: the matrix emits `modules:` in Task 1 and the `its` job consumes `${{ matrix.modules }}` in Task 2 — matched. The `SHARD_MODULES` env var in Task 2 step 2.4 matches the variable used in the `mvn` command. Script-path consistency: both the workflow's matrix step and the test runner reference `scripts/compute-it-matrix-modular.sh`; the original `scripts/compute-it-matrix.sh` is never referenced from the PR-branch workflow.
