@@ -34,7 +34,8 @@ if [ ! -d "$ROOT" ]; then
 fi
 
 # Read overlay short names from stdin as whitespace-separated tokens.
-input=$(cat)
+# Normalise newlines and tabs to spaces so callers may pipe one name per line.
+input=$(cat | tr '\n\t' '  ')
 read -r -a names <<<"$input"
 if [ "${#names[@]}" -eq 0 ]; then
   echo '{"include":[]}'
