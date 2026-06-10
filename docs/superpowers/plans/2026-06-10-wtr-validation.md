@@ -247,7 +247,9 @@ Using Edit tooling (do **not** use `sed`):
     needs: install
 ```
 
-- [ ] **Step 3: Add the `inputs.components` arg to the WTR run step**
+- [ ] **Step 3: Add the `inputs.components` arg to the WTR run step (via `env:` indirection)**
+
+Use the same env-var pattern the install job already uses for this input (`env: COMPONENTS: ${{ inputs.components }}` then `$COMPONENTS` in the shell). That keeps user-supplied dispatch input out of the templated `run:` string.
 
 Using Edit tooling:
 
@@ -260,7 +262,9 @@ Using Edit tooling:
 `new_string`:
 ```
       - name: Run WTR tests
-        run: cd flow-components && node scripts/wtr.js ${{ inputs.components }}
+        env:
+          COMPONENTS: ${{ inputs.components }}
+        run: cd flow-components && node scripts/wtr.js $COMPONENTS
 ```
 
 - [ ] **Step 4: Visually verify the diff**
@@ -269,7 +273,7 @@ Using Edit tooling:
 git diff .github/workflows/validation.yml
 ```
 
-Expected: a `-` for `    if: false` inside the `wtr:` block, and a `-/+` pair around the `Run WTR tests` step where the only change is the trailing `${{ inputs.components }}`. No other lines change.
+Expected: a `-` for `    if: false` inside the `wtr:` block, and a `-/+` hunk around the `Run WTR tests` step where the `run:` line gains `$COMPONENTS` and two new lines for `env:` / `COMPONENTS:` appear above it. No other lines change.
 
 - [ ] **Step 5: Lint the YAML by checking GitHub Actions parses it (optional but cheap)**
 

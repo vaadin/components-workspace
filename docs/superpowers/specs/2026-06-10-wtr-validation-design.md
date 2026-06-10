@@ -26,11 +26,13 @@ Three files touched, all in the workspace root. No submodule changes.
 Two edits inside the `wtr` job:
 
 1. Remove the `if: false` line (currently line 153).
-2. Pass the dispatch input through to the script:
+2. Pass the dispatch input through to the script via an env-var indirection (matches how the install job already handles the same input, and avoids interpolating workflow-dispatch input directly into a shell command):
 
    ```yaml
    - name: Run WTR tests
-     run: cd flow-components && node scripts/wtr.js ${{ inputs.components }}
+     env:
+       COMPONENTS: ${{ inputs.components }}
+     run: cd flow-components && node scripts/wtr.js $COMPONENTS
    ```
 
    When `inputs.components` is empty (the `pull_request` trigger has no such input), `wtr.js` enumerates all flow-components modules that have a `test/` folder — same default behavior as flow-components upstream uses.
