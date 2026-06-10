@@ -79,7 +79,9 @@ No overlay-symlink sync step. Overlay symlinks live inside the `flow-components/
 
 JDK setup is not needed — web-components tests are pure Node.
 
-After the cache restore, each job runs `yarn install --frozen-lockfile --no-progress --non-interactive` inside `web-components/` (preceded by `rm -rf node_modules` for the non-container jobs). The workspace-level `npm install` that populates the install cache hoists shared devDependencies into the workspace-root `node_modules/.bin/`, which leaves `web-components/node_modules/.bin/` sparse — `yarn lint`/`yarn test` invoked from `web-components/` cannot find `npm-run-all`, `web-test-runner`, etc. The `yarn install` step rebuilds a complete, non-hoisted submodule-local tree.
+All test commands inside `web-components/` use `npm`, not `yarn`. The workspace-level `npm install` (run in the `install` job) hoists shared devDependencies into the workspace-root `node_modules/.bin/`, leaving `web-components/node_modules/.bin/` empty. npm 7+ understands workspaces and resolves binaries from the workspace root when invoked from a workspace member; yarn 1.x does not. Running `cd web-components && npm test -- --config <theme>.config.js` therefore picks up `web-test-runner` from the hoisted root tree without any additional install step. For commands like `yarn lint` (whose script body is `npm-run-all --parallel lint:*`), `npm run lint` works for the same reason.
+
+`web-components/package.json`'s `test:snapshots`/`test:it`/`test:firefox`/`test:webkit` scripts are thin yarn wrappers around `yarn test --config <config>.js`. The workflow does **not** call those wrappers (calling them via npm would still invoke yarn internally, which would then fail to resolve the workspace-root bins). Instead, the workflow invokes the underlying `web-test-runner` form directly: `npm test -- --config web-test-runner-<config>.config.js`.
 
 ## `wc-verify` — lint, snapshots, integration
 
@@ -96,7 +98,7 @@ wc-verify:
 
     - name: Lint
       working-directory: web-components
-      run: yarn lint
+      run: npm run lint
 
     - name: Snapshot tests
       working-directory: web-components
@@ -104,10 +106,10 @@ wc-verify:
         COMPONENTS: ${{ inputs.components }}
       run: |
         if [ -z "${COMPONENTS:-}" ]; then
-          yarn test:snapshots --all
+          npm test -- --config web-test-runner-snapshots.config.js --all
         else
           for c in $COMPONENTS; do
-            yarn test:snapshots --group "$c"
+            npm test -- --config web-test-runner-snapshots.config.js --group "$c"
           done
         fi
 
@@ -117,15 +119,15 @@ wc-verify:
         COMPONENTS: ${{ inputs.components }}
       run: |
         if [ -z "${COMPONENTS:-}" ]; then
-          yarn test:it --all
+          npm test -- --config web-test-runner-it.config.js --all
         else
           for c in $COMPONENTS; do
-            yarn test:it --group "$c"
+            npm test -- --config web-test-runner-it.config.js --group "$c"
           done
         fi
 ```
 
-`yarn lint` runs across the whole repo regardless of `COMPONENTS` — lint has no per-component scope. The `--all` flag bypasses `wtr-utils.js`'s `getChangedPackages()` early-exit so the job has signal on PRs that don't touch `web-components/`.
+`npm run lint` runs across the whole repo regardless of `COMPONENTS` — lint has no per-component scope. The `--all` flag bypasses `wtr-utils.js`'s `getChangedPackages()` early-exit so the job has signal on PRs that don't touch `web-components/`.
 
 ## `wc-unit` — browser matrix
 
@@ -142,12 +144,12 @@ wc-unit:
     matrix:
       include:
         - browser: chrome
-          cmd: yarn test
+          cmd: npm test --
         - browser: firefox
-          cmd: yarn test:firefox
+          cmd: npm test -- --config web-test-runner-firefox.config.js
           playwright: firefox
         - browser: webkit
-          cmd: yarn test:webkit
+          cmd: npm test -- --config web-test-runner-webkit.config.js
           playwright: webkit
   steps:
     - <shared prelude>
@@ -206,9 +208,10 @@ wc-visual:
       with:
         node-version: '24'
 
-    - name: Install web-components devDependencies
-      working-directory: web-components
-      run: yarn install --frozen-lockfile --no-progress --non-interactive
+    - name: Install zstd
+      run: apt-get update && apt-get install -y zstd
+
+    - <restore install cache, same as wc-verify/wc-unit>
 
     - name: Visual tests — base
       uses: nick-fields/retry@v3
@@ -219,9 +222,9 @@ wc-visual:
         command: |
           cd web-components
           if [ -z "${COMPONENTS:-}" ]; then
-            yarn test --config web-test-runner-base.config.js --all
+            npm test -- --config web-test-runner-base.config.js --all
           else
-            for c in $COMPONENTS; do yarn test --config web-test-runner-base.config.js --group "$c"; done
+            for c in $COMPONENTS; do npm test -- --config web-test-runner-base.config.js --group "$c"; done
           fi
       env:
         COMPONENTS: ${{ inputs.components }}
@@ -235,9 +238,9 @@ wc-visual:
         command: |
           cd web-components
           if [ -z "${COMPONENTS:-}" ]; then
-            yarn test --config web-test-runner-lumo.config.js --all
+            npm test -- --config web-test-runner-lumo.config.js --all
           else
-            for c in $COMPONENTS; do yarn test --config web-test-runner-lumo.config.js --group "$c"; done
+            for c in $COMPONENTS; do npm test -- --config web-test-runner-lumo.config.js --group "$c"; done
           fi
       env:
         COMPONENTS: ${{ inputs.components }}
@@ -251,9 +254,9 @@ wc-visual:
         command: |
           cd web-components
           if [ -z "${COMPONENTS:-}" ]; then
-            yarn test --config web-test-runner-aura.config.js --all
+            npm test -- --config web-test-runner-aura.config.js --all
           else
-            for c in $COMPONENTS; do yarn test --config web-test-runner-aura.config.js --group "$c"; done
+            for c in $COMPONENTS; do npm test -- --config web-test-runner-aura.config.js --group "$c"; done
           fi
       env:
         COMPONENTS: ${{ inputs.components }}
@@ -277,9 +280,9 @@ wc-visual:
 
 The container needs `git config --global --add safe.directory` because the Playwright image runs git as a different user than the one that owns the checkout (upstream `visual-tests.yml` does the same). The explicit `git fetch origin main` mirrors upstream behavior; with `--all` passed to every test command, lerna does not actually consult `origin/main` today, but the fetch is cheap and keeps the job structurally identical to upstream — useful if `wtr-utils.js` changes in the submodule.
 
-`wc-visual` does **not** restore the workspace install cache. The `actions/cache/restore` step scopes its lookup by the OS detected at runtime, and the Playwright container's OS-detection produces a different scope than the host that saved the cache, so the restore reliably fails with `Failed to restore cache entry`. The job runs `yarn install` fresh from the registry inside the container — adds ~2-3 min to the job's wall time, well within the 90-min budget.
+The `Install zstd` step runs `apt-get install -y zstd` before the cache restore. `actions/cache@v5` uses zstd compression by default and fails to extract the cache archive if the binary is missing — the Playwright Noble image does not include `zstd` out of the box. Adding the install step adds ~5 seconds to the job and lets the cache restore work the same way it does in `wc-verify` and `wc-unit`.
 
-The visual-test commands invoke `web-test-runner` directly via `yarn test --config web-test-runner-<theme>.config.js`, **not** `yarn test:base/lumo/aura`. The `yarn test:<theme>` script in `web-components/package.json` wraps each test invocation in `./scripts/run-docker-visual-tests.sh`, which provides a deterministic browser environment by launching the Playwright image via `docker run`. Inside the GHA `container:` we are already running in that image, but there is no `docker` CLI available, so the wrapper fails. Calling `yarn test --config …` bypasses the wrapper and runs the test directly — same pattern upstream `visual-tests.yml` uses.
+The visual-test commands invoke `web-test-runner` directly via `npm test -- --config web-test-runner-<theme>.config.js`, **not** `npm run test:base/lumo/aura`. The `test:<theme>` scripts in `web-components/package.json` wrap each invocation in `./scripts/run-docker-visual-tests.sh`, which provides a deterministic browser environment by launching the Playwright image via `docker run`. Inside the GHA `container:` we are already running in that image, but there is no `docker` CLI available, so the wrapper fails. Calling `npm test -- --config …` bypasses the wrapper and runs the test directly — same pattern upstream `visual-tests.yml` uses.
 
 ## Components Filter Semantics
 

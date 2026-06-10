@@ -335,15 +335,9 @@ jobs:
             flow-components/vaadin-charts-flow-parent/vaadin-charts-flow-svg-generator/src/main/resources/META-INF/frontend/generated
           fail-on-cache-miss: true
 
-      - name: Install web-components devDependencies
-        working-directory: web-components
-        run: |
-          rm -rf node_modules
-          yarn install --frozen-lockfile --no-progress --non-interactive
-
       - name: Lint
         working-directory: web-components
-        run: yarn lint
+        run: npm run lint
 
       - name: Snapshot tests
         working-directory: web-components
@@ -351,10 +345,10 @@ jobs:
           COMPONENTS: ${{ inputs.components }}
         run: |
           if [ -z "${COMPONENTS:-}" ]; then
-            yarn test:snapshots --all
+            npm test -- --config web-test-runner-snapshots.config.js --all
           else
             for c in $COMPONENTS; do
-              yarn test:snapshots --group "$c"
+              npm test -- --config web-test-runner-snapshots.config.js --group "$c"
             done
           fi
 
@@ -364,10 +358,10 @@ jobs:
           COMPONENTS: ${{ inputs.components }}
         run: |
           if [ -z "${COMPONENTS:-}" ]; then
-            yarn test:it --all
+            npm test -- --config web-test-runner-it.config.js --all
           else
             for c in $COMPONENTS; do
-              yarn test:it --group "$c"
+              npm test -- --config web-test-runner-it.config.js --group "$c"
             done
           fi
 
@@ -381,12 +375,12 @@ jobs:
       matrix:
         include:
           - browser: chrome
-            cmd: yarn test
+            cmd: npm test --
           - browser: firefox
-            cmd: yarn test:firefox
+            cmd: npm test -- --config web-test-runner-firefox.config.js
             playwright: firefox
           - browser: webkit
-            cmd: yarn test:webkit
+            cmd: npm test -- --config web-test-runner-webkit.config.js
             playwright: webkit
     steps:
       - uses: actions/checkout@v6
@@ -411,12 +405,6 @@ jobs:
             flow-components/**/node_modules
             flow-components/vaadin-charts-flow-parent/vaadin-charts-flow-svg-generator/src/main/resources/META-INF/frontend/generated
           fail-on-cache-miss: true
-
-      - name: Install web-components devDependencies
-        working-directory: web-components
-        run: |
-          rm -rf node_modules
-          yarn install --frozen-lockfile --no-progress --non-interactive
 
       - name: Install Playwright browser
         if: matrix.playwright
@@ -465,9 +453,21 @@ jobs:
         with:
           node-version: '24'
 
-      - name: Install web-components devDependencies
-        working-directory: web-components
-        run: yarn install --frozen-lockfile --no-progress --non-interactive
+      - name: Install zstd
+        run: apt-get update && apt-get install -y zstd
+
+      - name: Restore install cache
+        uses: actions/cache/restore@v5
+        with:
+          key: ${{ needs.install.outputs.cache-key }}
+          path: |
+            ~/.m2/repository/com/vaadin
+            node_modules
+            web-components/node_modules
+            web-components/.yarn
+            flow-components/**/node_modules
+            flow-components/vaadin-charts-flow-parent/vaadin-charts-flow-svg-generator/src/main/resources/META-INF/frontend/generated
+          fail-on-cache-miss: true
 
       - name: Visual tests — base
         uses: nick-fields/retry@v3
@@ -478,9 +478,9 @@ jobs:
           command: |
             cd web-components
             if [ -z "${COMPONENTS:-}" ]; then
-              yarn test --config web-test-runner-base.config.js --all
+              npm test -- --config web-test-runner-base.config.js --all
             else
-              for c in $COMPONENTS; do yarn test --config web-test-runner-base.config.js --group "$c"; done
+              for c in $COMPONENTS; do npm test -- --config web-test-runner-base.config.js --group "$c"; done
             fi
         env:
           COMPONENTS: ${{ inputs.components }}
@@ -494,9 +494,9 @@ jobs:
           command: |
             cd web-components
             if [ -z "${COMPONENTS:-}" ]; then
-              yarn test --config web-test-runner-lumo.config.js --all
+              npm test -- --config web-test-runner-lumo.config.js --all
             else
-              for c in $COMPONENTS; do yarn test --config web-test-runner-lumo.config.js --group "$c"; done
+              for c in $COMPONENTS; do npm test -- --config web-test-runner-lumo.config.js --group "$c"; done
             fi
         env:
           COMPONENTS: ${{ inputs.components }}
@@ -510,9 +510,9 @@ jobs:
           command: |
             cd web-components
             if [ -z "${COMPONENTS:-}" ]; then
-              yarn test --config web-test-runner-aura.config.js --all
+              npm test -- --config web-test-runner-aura.config.js --all
             else
-              for c in $COMPONENTS; do yarn test --config web-test-runner-aura.config.js --group "$c"; done
+              for c in $COMPONENTS; do npm test -- --config web-test-runner-aura.config.js --group "$c"; done
             fi
         env:
           COMPONENTS: ${{ inputs.components }}
