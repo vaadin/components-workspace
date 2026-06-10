@@ -530,7 +530,7 @@ jobs:
 
   results:
     name: Collect results
-    needs: [install, unit, wtr, its]
+    needs: [install, unit, wtr, its, wc-verify, wc-unit, wc-visual]
     if: always() && needs.install.result == 'success'
     runs-on: ubuntu-latest
     permissions:
@@ -653,4 +653,7 @@ jobs:
           [[ "${{ steps.unit-dorny.outputs.conclusion }}" == "failure" ]] && failed=true
           [[ "${{ steps.wtr-dorny.outputs.conclusion }}"  == "failure" ]] && failed=true
           [[ "${{ steps.it-dorny.outputs.conclusion }}"   == "failure" ]] && failed=true
+          [[ "${{ needs.wc-verify.result }}" == "failure" ]] && failed=true
+          [[ "${{ needs.wc-unit.result }}"   == "failure" ]] && failed=true
+          [[ "${{ needs.wc-visual.result }}" == "failure" ]] && failed=true
           [[ "$failed" == "true" ]] && exit 1 || exit 0
