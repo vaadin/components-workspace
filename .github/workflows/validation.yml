@@ -75,6 +75,12 @@ jobs:
             patch -p1 -d .. < "$p"
           done
 
+      - name: Symlink web-components/node_modules/.bin to workspace root
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p web-components/node_modules
+          ln -snf ../../node_modules/.bin web-components/node_modules/.bin
+
       - name: Save install cache
         if: steps.cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v5

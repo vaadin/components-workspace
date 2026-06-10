@@ -87,6 +87,8 @@ The install job applies `web-components/patches/` after `./gradlew install`. The
 
 The install job applies the patches with the system `patch` binary rather than `patch-package`, because `patch-package` 8.x hardcodes its target to `<cwd>/node_modules` — running it from the workspace root muddles the attribution (patch-package is a `web-components` devDependency), and running it from `web-components/` fails outright because the hoisted `node_modules` lives one level up. The workflow loops over `web-components/patches/*.patch` with `working-directory: web-components` and `patch -p1 -d .. < "$p"`. The `-d ..` directs patch at the workspace root, where `node_modules/@web/...` actually lives. The patched state lands in the install cache and every downstream job consumes it.
 
+Immediately after the patches step, the install job creates the symlink `web-components/node_modules/.bin -> ../../node_modules/.bin`. `web-components/wtr-utils.js` (which is loaded at config-evaluation time by `web-test-runner-it.config.js` and the visual configs) hardcodes the path `./node_modules/.bin/lerna` and shells out to it via `execSync`. From `cwd=web-components/` that path resolves to `web-components/node_modules/.bin/lerna`, which under workspace hoisting is missing. The symlink restores the lookup transparently — `wtr-utils.js`'s `getChangedPackages()` call resolves `./node_modules/.bin/lerna` through the link to the hoisted root binary. The symlink is part of the cached `web-components/node_modules` path, so it persists into every downstream job.
+
 ## `wc-verify` — lint, snapshots, integration
 
 Single job, ~10-min budget. Runs three steps sequentially inside `web-components/`. Lint goes first because it's the fastest fail.
