@@ -45,9 +45,10 @@ jobs:
 
       - name: Compute cache key
         id: key
-        env:
-          KEY: ${{ runner.os }}-workspace-install-${{ hashFiles('package.json', 'package-lock.json', 'flow-components-overlay/**', 'web-components/yarn.lock', 'gradle/**', 'build.gradle.kts', 'settings.gradle.kts') }}-${{ github.sha }}
-        run: echo "value=$KEY" >> "$GITHUB_OUTPUT"
+        run: |
+          gitlinks=$(git ls-files -s flow-components web-components | sha256sum | cut -c1-16)
+          inputs="${{ hashFiles('package.json', 'package-lock.json', 'flow-components-overlay/**', 'web-components/yarn.lock', 'web-components/patches/**', 'gradle/**', 'build.gradle.kts', 'settings.gradle.kts', '.github/workflows/validation.yml') }}"
+          echo "value=${{ runner.os }}-workspace-install-${inputs}-${gitlinks}" >> "$GITHUB_OUTPUT"
 
       - name: Restore install cache (skip work if hit)
         id: cache
@@ -330,7 +331,9 @@ jobs:
       - uses: actions/checkout@v6
         with:
           submodules: recursive
-          fetch-depth: 0
+          # depth-1 is sufficient: `npm test -- --all` short-circuits the
+          # lerna-based `getChangedPackages()` in web-components/wtr-utils.js.
+          fetch-depth: 1
 
       - name: Setup Node
         uses: actions/setup-node@v6
@@ -401,7 +404,9 @@ jobs:
       - uses: actions/checkout@v6
         with:
           submodules: recursive
-          fetch-depth: 0
+          # depth-1 is sufficient: `npm test -- --all` short-circuits the
+          # lerna-based `getChangedPackages()` in web-components/wtr-utils.js.
+          fetch-depth: 1
 
       - name: Setup Node
         uses: actions/setup-node@v6
@@ -420,6 +425,13 @@ jobs:
             flow-components/**/node_modules
             flow-components/vaadin-charts-flow-parent/vaadin-charts-flow-svg-generator/src/main/resources/META-INF/frontend/generated
           fail-on-cache-miss: true
+
+      - name: Cache Playwright browsers
+        if: matrix.playwright
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ matrix.playwright }}-${{ hashFiles('web-components/yarn.lock') }}
 
       - name: Install Playwright browser
         if: matrix.playwright
@@ -455,7 +467,10 @@ jobs:
       - uses: actions/checkout@v6
         with:
           submodules: recursive
-          fetch-depth: 0
+          # depth-1 is sufficient: `npm test -- --all` short-circuits the
+          # lerna-based `getChangedPackages()` in web-components/wtr-utils.js.
+          # The explicit `git fetch origin main` below populates origin/main.
+          fetch-depth: 1
 
       - name: Fix git safe directory
         run: git config --global --add safe.directory $GITHUB_WORKSPACE
