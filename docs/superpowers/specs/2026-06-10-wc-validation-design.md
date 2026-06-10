@@ -384,12 +384,11 @@ The change is considered correct when, on the current 4-overlay state, the follo
 
 ## Implementation Steps
 
-1. Edit `scripts/compute-it-matrix.sh`: change `MAX_SHARDS="${MAX_SHARDS:-12}"` to `MAX_SHARDS="${MAX_SHARDS:-6}"`. Verify offline with a 250-class input.
+1. Edit `scripts/compute-it-matrix.sh`: change `MAX_SHARDS="${MAX_SHARDS:-12}"` to `MAX_SHARDS="${MAX_SHARDS:-6}"`. Verify offline with a 250-class input (§Verification step 7) before pushing — the cap change has no live signal until the overlay set grows past 210 IT classes.
 2. Add the three new jobs (`wc-verify`, `wc-unit`, `wc-visual`) to `.github/workflows/validation.yml` between the `its` job and the `results` job.
 3. Extend `results.needs:` to include the three new jobs and extend the trailing "Fail if any test failed" step with the three new conclusion checks.
-4. On a throwaway PR, verify the §Verification checklist points 1–6 and 9 end-to-end with the current 4-overlay state.
-5. Verify point 7 offline before pushing (cap change has no live signal until the overlay set grows).
-6. No `README.md` or branch-protection changes needed — `Collect results` already gates merge and inherits the new jobs via the `needs:` list.
+4. Push the changes on the current branch (`ci/wc-validation`) and open a PR from that branch to `main`. This is the live validation PR — not a throwaway. The PR's own pipeline run is what we use to verify §Verification checklist points 1–6 and 9 end-to-end against the current 4-overlay state. We merge the same PR after the run goes green.
+5. No `README.md` or branch-protection changes needed — `Collect results` already gates merge and inherits the new jobs via the `needs:` list.
 
 ## References
 
