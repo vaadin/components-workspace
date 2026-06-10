@@ -5,7 +5,7 @@
 # TARGET_PER_SHARD classes per shard.
 #
 # Env overrides:
-#   MAX_SHARDS        — default 12 (hard cap on parallel shards)
+#   MAX_SHARDS        — default 6 (hard cap on parallel shards)
 #   TARGET_PER_SHARD  — default 35 (per-shard class count target)
 #
 # Positional arg: flow-components root (default flow-components). Each input
@@ -15,7 +15,7 @@
 
 set -euo pipefail
 
-MAX_SHARDS="${MAX_SHARDS:-12}"
+MAX_SHARDS="${MAX_SHARDS:-6}"
 TARGET_PER_SHARD="${TARGET_PER_SHARD:-35}"
 ROOT="${1:-flow-components}"
 
