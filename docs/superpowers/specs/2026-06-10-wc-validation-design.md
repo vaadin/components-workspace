@@ -34,17 +34,18 @@ The work also reduces the IT shard cap from 12 to 6 so the new parallel load fit
 ```
 [install]
     │
-    ├──► [unit]                   Java unit tests        (unchanged)
-    ├──► [wtr]                    flow-components WTR    (unchanged)
-    ├──► [its]                    Selenium IT shards     (cap 12 → 6)
-    ├──► [wc-verify]              yarn lint + test:snapshots + test:it
-    ├──► [wc-unit]                matrix: chrome | firefox | webkit
-    └──► [wc-visual]              yarn test:base + test:lumo + test:aura
+    ├──► [flow-components-unit]               Java unit tests
+    ├──► [flow-components-wtr]                flow-components WTR
+    ├──► [flow-components-its]                Selenium IT shards (cap 6)
+    ├──► [web-components-verify]              yarn lint + test:snapshots + test:it
+    ├──► [web-components-unit]                matrix: chrome | firefox | webkit
+    └──► [web-components-visual]              yarn test:base + test:lumo + test:aura
 
-[install, unit, wtr, its, wc-verify, wc-unit, wc-visual] ──► [results]
+[install, flow-components-unit, flow-components-wtr, flow-components-its,
+ web-components-verify, web-components-unit, web-components-visual] ──► [results]
 ```
 
-All three new jobs `needs: install` and fan out in parallel with `unit`, `wtr`, and `its`. The `results` job extends its `needs:` list to include them and adds them to the trailing "fail if any test failed" check.
+All six per-submodule jobs `needs: install` and fan out in parallel. The `results` job consumes their conclusions and the trailing failure check fails the gate if any job reports `failure` (`skipped` is not treated as a failure, so fork PRs that skip `web-components-visual` keep `results` green).
 
 ## Shared Job Prelude
 
@@ -89,13 +90,13 @@ The install job applies the patches with the system `patch` binary rather than `
 
 Immediately after the patches step, the install job creates the symlink `web-components/node_modules/.bin -> ../../node_modules/.bin`. `web-components/wtr-utils.js` (which is loaded at config-evaluation time by `web-test-runner-it.config.js` and the visual configs) hardcodes the path `./node_modules/.bin/lerna` and shells out to it via `execSync`. From `cwd=web-components/` that path resolves to `web-components/node_modules/.bin/lerna`, which under workspace hoisting is missing. The symlink restores the lookup transparently — `wtr-utils.js`'s `getChangedPackages()` call resolves `./node_modules/.bin/lerna` through the link to the hoisted root binary. The symlink is part of the cached `web-components/node_modules` path, so it persists into every downstream job.
 
-## `wc-verify` — lint, snapshots, integration
+## `web-components-verify` — lint, snapshots, integration
 
 Single job, ~10-min budget. Runs three steps sequentially inside `web-components/`. Lint goes first because it's the fastest fail.
 
 ```yaml
-wc-verify:
-  name: WC Verify
+web-components-verify:
+  name: Web Components Verify
   needs: install
   runs-on: ubuntu-latest
   timeout-minutes: 15
@@ -135,13 +136,13 @@ wc-verify:
 
 `npm run lint` runs across the whole repo regardless of `COMPONENTS` — lint has no per-component scope. The `--all` flag bypasses `wtr-utils.js`'s `getChangedPackages()` early-exit so the job has signal on PRs that don't touch `web-components/`.
 
-## `wc-unit` — browser matrix
+## `web-components-unit` — browser matrix
 
 Three matrix entries, one per browser. Chrome uses the runner's pre-installed Chromium; Firefox and WebKit need a `playwright install --with-deps` step before tests run.
 
 ```yaml
-wc-unit:
-  name: WC Unit (${{ matrix.browser }})
+web-components-unit:
+  name: Web Components Unit (${{ matrix.browser }})
   needs: install
   runs-on: ubuntu-latest
   timeout-minutes: 30
@@ -180,15 +181,15 @@ wc-unit:
         fi
 ```
 
-`fail-fast: false` lets one browser's failure not mask another's. Per-matrix-entry checks appear on the PR check tab as `WC Unit (chrome)`, `WC Unit (firefox)`, `WC Unit (webkit)`.
+`fail-fast: false` lets one browser's failure not mask another's. Per-matrix-entry checks appear on the PR check tab as `Web Components Unit (chrome)`, `Web Components Unit (firefox)`, `Web Components Unit (webkit)`.
 
-## `wc-visual` — base, Lumo, Aura
+## `web-components-visual` — base, Lumo, Aura
 
 Single job running inside the Playwright docker container that upstream `visual-tests.yml` uses. Sequential steps for each theme; each wrapped in `nick-fields/retry@v3` to absorb visual flakes the same way upstream does.
 
 ```yaml
-wc-visual:
-  name: WC Visual
+web-components-visual:
+  name: Web Components Visual
   needs: install
   runs-on: ubuntu-latest
   timeout-minutes: 90
@@ -217,7 +218,7 @@ wc-visual:
     - name: Install zstd
       run: apt-get update && apt-get install -y zstd
 
-    - <restore install cache, same as wc-verify/wc-unit>
+    - <restore install cache, same as web-components-verify/web-components-unit>
 
     - name: Visual tests — base
       uses: nick-fields/retry@v3
@@ -271,7 +272,7 @@ wc-visual:
       if: failure()
       uses: actions/upload-artifact@v6
       with:
-        name: wc-visual-screenshots
+        name: web-components-visual-screenshots
         path: |
           web-components/packages/*/test/visual/base/screenshots/*/failed/*.png
           web-components/packages/*/test/visual/lumo/screenshots/*/failed/*.png
@@ -286,13 +287,13 @@ wc-visual:
 
 The container needs `git config --global --add safe.directory` because the Playwright image runs git as a different user than the one that owns the checkout (upstream `visual-tests.yml` does the same). The explicit `git fetch origin main` mirrors upstream behavior; with `--all` passed to every test command, lerna does not actually consult `origin/main` today, but the fetch is cheap and keeps the job structurally identical to upstream — useful if `wtr-utils.js` changes in the submodule.
 
-The `Install zstd` step runs `apt-get install -y zstd` before the cache restore. `actions/cache@v5` uses zstd compression by default and fails to extract the cache archive if the binary is missing — the Playwright Noble image does not include `zstd` out of the box. Adding the install step adds ~5 seconds to the job and lets the cache restore work the same way it does in `wc-verify` and `wc-unit`.
+The `Install zstd` step runs `apt-get install -y zstd` before the cache restore. `actions/cache@v5` uses zstd compression by default and fails to extract the cache archive if the binary is missing — the Playwright Noble image does not include `zstd` out of the box. Adding the install step adds ~5 seconds to the job and lets the cache restore work the same way it does in `web-components-verify` and `web-components-unit`.
 
 The visual-test commands invoke `web-test-runner` directly via `npm test -- --config web-test-runner-<theme>.config.js`, **not** `npm run test:base/lumo/aura`. The `test:<theme>` scripts in `web-components/package.json` wrap each invocation in `./scripts/run-docker-visual-tests.sh`, which provides a deterministic browser environment by launching the Playwright image via `docker run`. Inside the GHA `container:` we are already running in that image, but there is no `docker` CLI available, so the wrapper fails. Calling `npm test -- --config …` bypasses the wrapper and runs the test directly — same pattern upstream `visual-tests.yml` uses.
 
 ## Components Filter Semantics
 
-`workflow_dispatch.inputs.components` is already declared in the workflow (consumed by `install` for matrix narrowing and by `wtr` for `node scripts/wtr.js $COMPONENTS`). The new jobs extend the same input semantics:
+`workflow_dispatch.inputs.components` is already declared in the workflow (consumed by `install` for matrix narrowing and by `flow-components-wtr` for `node scripts/wtr.js $COMPONENTS`). The new jobs extend the same input semantics:
 
 - Empty value (the `pull_request` trigger always has empty input): each job runs `yarn <cmd> --all`, exercising every web-components package that has tests.
 - One or more space-separated short names (`"grid"`, `"grid combo-box"`): each job loops over the names and runs `yarn <cmd> --group "$c"` per name.
@@ -318,7 +319,7 @@ Round-robin algorithm is unchanged. With `TARGET_PER_SHARD=35` and `MAX_SHARDS=6
 | 211–420 | 6 (capped) | 36–70 |
 | 420+ | 6 (capped) | 70+ |
 
-Today the workspace ships with 4 overlay modules and well under 210 IT classes total, so the cap doesn't kick in yet — IT matrix stays at 4 shards. The cap matters once the overlay set grows: each shard packs ~2× the work it would have under the old cap. The existing `timeout-minutes: 120` on the `its` job accommodates this.
+Today the workspace ships with 4 overlay modules and well under 210 IT classes total, so the cap doesn't kick in yet — IT matrix stays at 4 shards. The cap matters once the overlay set grows: each shard packs ~2× the work it would have under the old cap. The existing `timeout-minutes: 120` on the `flow-components-its` job accommodates this.
 
 Verification of the cap change is offline: pipe a synthetic 250-class list through the script (see §Verification step 7) and confirm the output has exactly 6 buckets.
 
@@ -329,7 +330,7 @@ Two surgical edits in the existing `results` job. No new dorny steps — pass/fa
 1. Extend the `needs:` list:
 
    ```yaml
-   needs: [install, unit, wtr, its, wc-verify, wc-unit, wc-visual]
+   needs: [install, flow-components-unit, flow-components-wtr, flow-components-its, web-components-verify, web-components-unit, web-components-visual]
    ```
 
 2. Extend the trailing "Fail if any test failed" step to consult the new job conclusions. The new jobs do not have dorny step outputs, so we check `needs.<job>.result` directly:
@@ -342,13 +343,13 @@ Two surgical edits in the existing `results` job. No new dorny steps — pass/fa
        [[ "${{ steps.unit-dorny.outputs.conclusion }}" == "failure" ]] && failed=true
        [[ "${{ steps.wtr-dorny.outputs.conclusion }}"  == "failure" ]] && failed=true
        [[ "${{ steps.it-dorny.outputs.conclusion }}"   == "failure" ]] && failed=true
-       [[ "${{ needs.wc-verify.result }}" == "failure" ]] && failed=true
-       [[ "${{ needs.wc-unit.result }}"   == "failure" ]] && failed=true
-       [[ "${{ needs.wc-visual.result }}" == "failure" ]] && failed=true
+       [[ "${{ needs.web-components-verify.result }}" == "failure" ]] && failed=true
+       [[ "${{ needs.web-components-unit.result }}"   == "failure" ]] && failed=true
+       [[ "${{ needs.web-components-visual.result }}" == "failure" ]] && failed=true
        [[ "$failed" == "true" ]] && exit 1 || exit 0
    ```
 
-`needs.<matrix-job>.result` is `failure` if **any** matrix entry failed (GitHub Actions semantics) — that's the behavior we want for `wc-unit`.
+`needs.<matrix-job>.result` is `failure` if **any** matrix entry failed (GitHub Actions semantics) — that's the behavior we want for `web-components-unit`.
 
 The existing `if: always() && needs.install.result == 'success'` gate stays unchanged: `results` runs whenever `install` succeeds and lets us aggregate even partial failures downstream.
 
@@ -360,21 +361,21 @@ No changes to the cache key or cached paths. The existing install cache already 
 
 ## Fork Gating
 
-Only `wc-visual` has a fork gate (`if: github.repository_owner == 'vaadin'`), matching upstream `visual-tests.yml`. The lint/snapshot/integration/unit suites run on forks the same way they would on internal PRs — they don't depend on registered runners or secrets.
+Only `web-components-visual` has a fork gate (`if: github.repository_owner == 'vaadin'`), matching upstream `visual-tests.yml`. The lint/snapshot/integration/unit suites run on forks the same way they would on internal PRs — they don't depend on registered runners or secrets.
 
 Forks contributing to this repo will see:
 
-- `wc-verify`, `wc-unit (chrome|firefox|webkit)` — run normally.
-- `wc-visual` — skipped (not failed). `needs.wc-visual.result` is `skipped`, which the trailing failure check does not treat as `failure`, so `Collect results` stays green on visual-test skip.
+- `web-components-verify`, `web-components-unit (chrome|firefox|webkit)` — run normally.
+- `web-components-visual` — skipped (not failed). `needs.web-components-visual.result` is `skipped`, which the trailing failure check does not treat as `failure`, so `Collect results` stays green on visual-test skip.
 
 ## Verification
 
 The change is considered correct when, on the current 4-overlay state, the following all hold on a single test PR:
 
-1. `wc-verify` completes within ~10 minutes; lint, snapshots, and integration each pass.
-2. `wc-unit` produces three matrix checks (`chrome`, `firefox`, `webkit`); each passes; `fail-fast: false` is verified by deliberately failing a single browser run and watching the other two complete.
-3. `wc-visual` runs on a `vaadin`-owned PR and completes within ~30 minutes (each theme ≤20 minutes with retries); fails-screenshots-on-failure upload to artifacts.
-4. A fork-owned PR sees `wc-visual` skipped, not failed; `Collect results` stays green.
+1. `web-components-verify` completes within ~10 minutes; lint, snapshots, and integration each pass.
+2. `web-components-unit` produces three matrix checks (`chrome`, `firefox`, `webkit`); each passes; `fail-fast: false` is verified by deliberately failing a single browser run and watching the other two complete.
+3. `web-components-visual` runs on a `vaadin`-owned PR and completes within ~30 minutes (each theme ≤20 minutes with retries); fails-screenshots-on-failure upload to artifacts.
+4. A fork-owned PR sees `web-components-visual` skipped, not failed; `Collect results` stays green.
 5. Deliberate failures in each new job (a lint error, a broken snapshot, a thrown assertion in a unit test, a screenshot diff) each surface as a red `Collect results` on the PR.
 6. `workflow_dispatch` with `components: "grid"` runs each new job against only the `grid` group; lint still runs over the whole repo. Job logs show `yarn test:snapshots --group grid`, `yarn test:it --group grid`, `yarn test --group grid` etc.
 7. `bash scripts/compute-it-matrix.sh` against a synthetic 250-IT input produces exactly 6 buckets (`1/6 … 6/6`). With the current 4-overlay class count, the live matrix still produces 4 shards.
@@ -384,15 +385,15 @@ The change is considered correct when, on the current 4-overlay state, the follo
 ## Future Work
 
 - **JUnit aggregation for web-components results.** Wire `@web/test-runner-junit-reporter` (or equivalent) into the WTR configs so dorny can publish per-test counts for the new jobs on the PR check tab. Currently we rely on job-level pass/fail only.
-- **Per-package sharding inside `wc-unit`.** If unit-test wall time grows past the 30-min budget once more packages migrate to per-package suites, shard the matrix on package rather than browser.
+- **Per-package sharding inside `web-components-unit`.** If unit-test wall time grows past the 30-min budget once more packages migrate to per-package suites, shard the matrix on package rather than browser.
 - **Cache Playwright browser downloads.** Firefox/WebKit each do a fresh `playwright install` per job. Caching `~/.cache/ms-playwright` keyed off the Playwright version pinned in `web-components/package.json` would save ~30s per run.
-- **Bring up `wc-visual` on forks via a workflow trigger split.** Currently fork PRs lose visual signal. Upstream uses an environment-gated job — workspace could replicate once we evaluate the secret-handling story.
-- **Sub-sharding visual tests by theme.** If `wc-visual` wall time becomes a critical-path concern (currently dominated by retries on flakes), split into three parallel jobs (base/Lumo/Aura) — design rejected for the first cut to keep job-count growth modest.
+- **Bring up `web-components-visual` on forks via a workflow trigger split.** Currently fork PRs lose visual signal. Upstream uses an environment-gated job — workspace could replicate once we evaluate the secret-handling story.
+- **Sub-sharding visual tests by theme.** If `web-components-visual` wall time becomes a critical-path concern (currently dominated by retries on flakes), split into three parallel jobs (base/Lumo/Aura) — design rejected for the first cut to keep job-count growth modest.
 
 ## Implementation Steps
 
 1. Edit `scripts/compute-it-matrix.sh`: change `MAX_SHARDS="${MAX_SHARDS:-12}"` to `MAX_SHARDS="${MAX_SHARDS:-6}"`. Verify offline with a 250-class input (§Verification step 7) before pushing — the cap change has no live signal until the overlay set grows past 210 IT classes.
-2. Add the three new jobs (`wc-verify`, `wc-unit`, `wc-visual`) to `.github/workflows/validation.yml` between the `its` job and the `results` job.
+2. Add the three new jobs (`web-components-verify`, `web-components-unit`, `web-components-visual`) to `.github/workflows/validation.yml` between the `flow-components-its` job and the `results` job.
 3. Extend `results.needs:` to include the three new jobs and extend the trailing "Fail if any test failed" step with the three new conclusion checks.
 4. Push the changes on the current branch (`ci/wc-validation`) and open a PR from that branch to `main`. This is the live validation PR — not a throwaway. The PR's own pipeline run is what we use to verify §Verification checklist points 1–6 and 9 end-to-end against the current 4-overlay state. We merge the same PR after the run goes green.
 5. No `README.md` or branch-protection changes needed — `Collect results` already gates merge and inherits the new jobs via the `needs:` list.

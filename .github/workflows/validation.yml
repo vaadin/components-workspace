@@ -110,8 +110,8 @@ jobs:
             echo 'EOF'
           } >> "$GITHUB_OUTPUT"
 
-  unit:
-    name: Unit Tests
+  flow-components-unit:
+    name: Flow Components Unit Tests
     needs: install
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -164,8 +164,8 @@ jobs:
           retention-days: 1
           if-no-files-found: ignore
 
-  wtr:
-    name: WTR Tests
+  flow-components-wtr:
+    name: Flow Components WTR Tests
     needs: install
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -227,8 +227,8 @@ jobs:
           retention-days: 1
           if-no-files-found: ignore
 
-  its:
-    name: IT ${{ matrix.shard }}
+  flow-components-its:
+    name: Flow Components IT ${{ matrix.shard }}
     needs: [install]
     if: needs.install.outputs.it-matrix != '' && fromJson(needs.install.outputs.it-matrix).include[0] != null
     runs-on: ubuntu-latest
@@ -322,8 +322,8 @@ jobs:
           retention-days: 5
           if-no-files-found: ignore
 
-  wc-verify:
-    name: WC Verify
+  web-components-verify:
+    name: Web Components Verify
     needs: install
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -383,8 +383,8 @@ jobs:
             done
           fi
 
-  wc-unit:
-    name: WC Unit (${{ matrix.browser }})
+  web-components-unit:
+    name: Web Components Unit (${{ matrix.browser }})
     needs: install
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -452,8 +452,8 @@ jobs:
             done
           fi
 
-  wc-visual:
-    name: WC Visual
+  web-components-visual:
+    name: Web Components Visual
     needs: install
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -551,7 +551,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v6
         with:
-          name: wc-visual-screenshots
+          name: web-components-visual-screenshots
           path: |
             web-components/packages/*/test/visual/base/screenshots/*/failed/*.png
             web-components/packages/*/test/visual/lumo/screenshots/*/failed/*.png
@@ -563,7 +563,7 @@ jobs:
 
   results:
     name: Collect results
-    needs: [install, unit, wtr, its, wc-verify, wc-unit, wc-visual]
+    needs: [install, flow-components-unit, flow-components-wtr, flow-components-its, web-components-verify, web-components-unit, web-components-visual]
     if: always() && needs.install.result == 'success'
     runs-on: ubuntu-latest
     permissions:
@@ -626,7 +626,7 @@ jobs:
         if: hashFiles('surefire-reports/**/TEST-*.xml') != ''
         uses: dorny/test-reporter@a43b3a5f7366b97d083190328d2c652e1a8b6aa2
         with:
-          name: Unit Tests
+          name: Flow Components Unit Tests
           path: surefire-reports/**/TEST-*.xml
           reporter: java-junit
           list-tests: ${{ env.has_failures == 'true' && 'failed' || 'all' }}
@@ -637,7 +637,7 @@ jobs:
         if: hashFiles('wtr-reports/**/wtr-results.xml') != ''
         uses: dorny/test-reporter@a43b3a5f7366b97d083190328d2c652e1a8b6aa2
         with:
-          name: WTR Tests
+          name: Flow Components WTR Tests
           path: wtr-reports/**/wtr-results.xml
           reporter: java-junit
           list-tests: ${{ env.has_failures == 'true' && 'failed' || 'all' }}
@@ -648,14 +648,14 @@ jobs:
         if: hashFiles('failsafe-reports/**/TEST-*.xml') != ''
         uses: dorny/test-reporter@a43b3a5f7366b97d083190328d2c652e1a8b6aa2
         with:
-          name: Integration Tests
+          name: Flow Components Integration Tests
           path: failsafe-reports/**/TEST-*.xml
           reporter: java-junit
           list-tests: ${{ env.has_failures == 'true' && 'failed' || 'all' }}
           fail-on-error: 'false'
 
       - name: Upload merged error screenshots
-        if: needs.its.result != 'success'
+        if: needs.flow-components-its.result != 'success'
         uses: actions/upload-artifact@v6
         with:
           name: error-screenshots
@@ -686,7 +686,7 @@ jobs:
           [[ "${{ steps.unit-dorny.outputs.conclusion }}" == "failure" ]] && failed=true
           [[ "${{ steps.wtr-dorny.outputs.conclusion }}"  == "failure" ]] && failed=true
           [[ "${{ steps.it-dorny.outputs.conclusion }}"   == "failure" ]] && failed=true
-          [[ "${{ needs.wc-verify.result }}" == "failure" ]] && failed=true
-          [[ "${{ needs.wc-unit.result }}"   == "failure" ]] && failed=true
-          [[ "${{ needs.wc-visual.result }}" == "failure" ]] && failed=true
+          [[ "${{ needs.web-components-verify.result }}" == "failure" ]] && failed=true
+          [[ "${{ needs.web-components-unit.result }}"   == "failure" ]] && failed=true
+          [[ "${{ needs.web-components-visual.result }}" == "failure" ]] && failed=true
           [[ "$failed" == "true" ]] && exit 1 || exit 0
