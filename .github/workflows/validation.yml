@@ -150,7 +150,6 @@ jobs:
 
   wtr:
     name: WTR Tests
-    if: false
     needs: install
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -199,7 +198,9 @@ jobs:
           echo "{\"username\":\"${user}\",\"proKey\":\"${key}\"}" > ~/.vaadin/proKey
 
       - name: Run WTR tests
-        run: cd flow-components && node scripts/wtr.js
+        env:
+          COMPONENTS: ${{ inputs.components }}
+        run: cd flow-components && node scripts/wtr.js $COMPONENTS
 
       - name: Upload WTR reports
         if: always()

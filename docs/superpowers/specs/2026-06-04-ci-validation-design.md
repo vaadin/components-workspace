@@ -275,8 +275,6 @@ wtr:
 
 WTR runs all WTR-eligible components in flow-components. Like `unit`, not overlay-scoped. Java 21 is required because the WTR launcher reuses Maven-built classpath state. TestBench license is required because WTR-eligible components include some that gate on Vaadin Pro features.
 
-> **NOTE:** The `wtr` job is currently disabled via `if: false` while a license/setup issue is being triaged. The job body is left in place so it can be re-enabled by removing the `if:` line. Tracked under §Future Work.
-
 ### `package-war` — package the integration-tests WAR
 
 ```yaml
@@ -658,7 +656,6 @@ After the rollout grows `overlays.txt`, the same workflow validates the new stat
 
 ## Future Work
 
-- **Re-enable the `wtr` job.** Currently gated by `if: false` while a Java/Node/TestBench-licensing issue is triaged. The job already has all the prerequisites wired (JDK 21, Node 24, license install) — flipping `if: false` to `if: true` should be the final step after the underlying issue is identified.
 - **Scheduled run** against latest submodule heads. Adds a nightly `cron:` trigger that bumps both submodules to upstream `main` before installing, catching cross-repo drift even without a workspace PR.
 - **Merge queue (`merge_group`) support.** Skip `pull_request` once we move to merge-queue gating to avoid double runs.
 - **Sub-sharding for huge modules.** If a single module's IT suite ever exceeds the 90-minute shard timeout, split it by IT-class count (mirror flow-components' `TARGET_PER_SHARD=35` approach within a single module).
