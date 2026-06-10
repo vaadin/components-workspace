@@ -478,9 +478,9 @@ jobs:
           command: |
             cd web-components
             if [ -z "${COMPONENTS:-}" ]; then
-              yarn test:base --all
+              yarn test --config web-test-runner-base.config.js --all
             else
-              for c in $COMPONENTS; do yarn test:base --group "$c"; done
+              for c in $COMPONENTS; do yarn test --config web-test-runner-base.config.js --group "$c"; done
             fi
         env:
           COMPONENTS: ${{ inputs.components }}
@@ -494,9 +494,9 @@ jobs:
           command: |
             cd web-components
             if [ -z "${COMPONENTS:-}" ]; then
-              yarn test:lumo --all
+              yarn test --config web-test-runner-lumo.config.js --all
             else
-              for c in $COMPONENTS; do yarn test:lumo --group "$c"; done
+              for c in $COMPONENTS; do yarn test --config web-test-runner-lumo.config.js --group "$c"; done
             fi
         env:
           COMPONENTS: ${{ inputs.components }}
@@ -510,9 +510,9 @@ jobs:
           command: |
             cd web-components
             if [ -z "${COMPONENTS:-}" ]; then
-              yarn test:aura --all
+              yarn test --config web-test-runner-aura.config.js --all
             else
-              for c in $COMPONENTS; do yarn test:aura --group "$c"; done
+              for c in $COMPONENTS; do yarn test --config web-test-runner-aura.config.js --group "$c"; done
             fi
         env:
           COMPONENTS: ${{ inputs.components }}
