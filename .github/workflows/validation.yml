@@ -335,6 +335,12 @@ jobs:
             flow-components/vaadin-charts-flow-parent/vaadin-charts-flow-svg-generator/src/main/resources/META-INF/frontend/generated
           fail-on-cache-miss: true
 
+      - name: Install web-components devDependencies
+        working-directory: web-components
+        run: |
+          rm -rf node_modules
+          yarn install --frozen-lockfile --no-progress --non-interactive
+
       - name: Lint
         working-directory: web-components
         run: yarn lint
@@ -406,6 +412,12 @@ jobs:
             flow-components/vaadin-charts-flow-parent/vaadin-charts-flow-svg-generator/src/main/resources/META-INF/frontend/generated
           fail-on-cache-miss: true
 
+      - name: Install web-components devDependencies
+        working-directory: web-components
+        run: |
+          rm -rf node_modules
+          yarn install --frozen-lockfile --no-progress --non-interactive
+
       - name: Install Playwright browser
         if: matrix.playwright
         working-directory: web-components
@@ -453,18 +465,9 @@ jobs:
         with:
           node-version: '24'
 
-      - name: Restore install cache
-        uses: actions/cache/restore@v5
-        with:
-          key: ${{ needs.install.outputs.cache-key }}
-          path: |
-            ~/.m2/repository/com/vaadin
-            node_modules
-            web-components/node_modules
-            web-components/.yarn
-            flow-components/**/node_modules
-            flow-components/vaadin-charts-flow-parent/vaadin-charts-flow-svg-generator/src/main/resources/META-INF/frontend/generated
-          fail-on-cache-miss: true
+      - name: Install web-components devDependencies
+        working-directory: web-components
+        run: yarn install --frozen-lockfile --no-progress --non-interactive
 
       - name: Visual tests — base
         uses: nick-fields/retry@v3
