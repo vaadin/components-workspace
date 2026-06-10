@@ -306,6 +306,65 @@ jobs:
           retention-days: 5
           if-no-files-found: ignore
 
+  wc-verify:
+    name: WC Verify
+    needs: install
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Restore install cache
+        uses: actions/cache/restore@v5
+        with:
+          key: ${{ needs.install.outputs.cache-key }}
+          path: |
+            ~/.m2/repository/com/vaadin
+            node_modules
+            web-components/node_modules
+            web-components/.yarn
+            flow-components/**/node_modules
+            flow-components/vaadin-charts-flow-parent/vaadin-charts-flow-svg-generator/src/main/resources/META-INF/frontend/generated
+          fail-on-cache-miss: true
+
+      - name: Lint
+        working-directory: web-components
+        run: yarn lint
+
+      - name: Snapshot tests
+        working-directory: web-components
+        env:
+          COMPONENTS: ${{ inputs.components }}
+        run: |
+          if [ -z "${COMPONENTS:-}" ]; then
+            yarn test:snapshots --all
+          else
+            for c in $COMPONENTS; do
+              yarn test:snapshots --group "$c"
+            done
+          fi
+
+      - name: Integration tests
+        working-directory: web-components
+        env:
+          COMPONENTS: ${{ inputs.components }}
+        run: |
+          if [ -z "${COMPONENTS:-}" ]; then
+            yarn test:it --all
+          else
+            for c in $COMPONENTS; do
+              yarn test:it --group "$c"
+            done
+          fi
+
   results:
     name: Collect results
     needs: [install, unit, wtr, its]
