@@ -68,7 +68,12 @@ jobs:
 
       - name: Apply web-components patches
         if: steps.cache.outputs.cache-hit != 'true'
-        run: npx patch-package --patch-dir web-components/patches
+        working-directory: web-components
+        run: |
+          for p in patches/*.patch; do
+            echo "Applying $p"
+            patch -p1 -d .. < "$p"
+          done
 
       - name: Save install cache
         if: steps.cache.outputs.cache-hit != 'true'
