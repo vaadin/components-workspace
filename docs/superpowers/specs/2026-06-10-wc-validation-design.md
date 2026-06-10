@@ -79,6 +79,8 @@ No overlay-symlink sync step. Overlay symlinks live inside the `flow-components/
 
 JDK setup is not needed — web-components tests are pure Node.
 
+After the cache restore, each job runs `yarn install --frozen-lockfile --no-progress --non-interactive` inside `web-components/` (preceded by `rm -rf node_modules` for the non-container jobs). The workspace-level `npm install` that populates the install cache hoists shared devDependencies into the workspace-root `node_modules/.bin/`, which leaves `web-components/node_modules/.bin/` sparse — `yarn lint`/`yarn test` invoked from `web-components/` cannot find `npm-run-all`, `web-test-runner`, etc. The `yarn install` step rebuilds a complete, non-hoisted submodule-local tree.
+
 ## `wc-verify` — lint, snapshots, integration
 
 Single job, ~10-min budget. Runs three steps sequentially inside `web-components/`. Lint goes first because it's the fastest fail.
@@ -204,17 +206,9 @@ wc-visual:
       with:
         node-version: '24'
 
-    - uses: actions/cache/restore@v5
-      with:
-        key: ${{ needs.install.outputs.cache-key }}
-        path: |
-          ~/.m2/repository/com/vaadin
-          node_modules
-          web-components/node_modules
-          web-components/.yarn
-          flow-components/**/node_modules
-          flow-components/vaadin-charts-flow-parent/vaadin-charts-flow-svg-generator/src/main/resources/META-INF/frontend/generated
-        fail-on-cache-miss: true
+    - name: Install web-components devDependencies
+      working-directory: web-components
+      run: yarn install --frozen-lockfile --no-progress --non-interactive
 
     - name: Visual tests — base
       uses: nick-fields/retry@v3
@@ -225,9 +219,9 @@ wc-visual:
         command: |
           cd web-components
           if [ -z "${COMPONENTS:-}" ]; then
-            yarn test:base --all
+            yarn test --config web-test-runner-base.config.js --all
           else
-            for c in $COMPONENTS; do yarn test:base --group "$c"; done
+            for c in $COMPONENTS; do yarn test --config web-test-runner-base.config.js --group "$c"; done
           fi
       env:
         COMPONENTS: ${{ inputs.components }}
@@ -241,9 +235,9 @@ wc-visual:
         command: |
           cd web-components
           if [ -z "${COMPONENTS:-}" ]; then
-            yarn test:lumo --all
+            yarn test --config web-test-runner-lumo.config.js --all
           else
-            for c in $COMPONENTS; do yarn test:lumo --group "$c"; done
+            for c in $COMPONENTS; do yarn test --config web-test-runner-lumo.config.js --group "$c"; done
           fi
       env:
         COMPONENTS: ${{ inputs.components }}
@@ -257,9 +251,9 @@ wc-visual:
         command: |
           cd web-components
           if [ -z "${COMPONENTS:-}" ]; then
-            yarn test:aura --all
+            yarn test --config web-test-runner-aura.config.js --all
           else
-            for c in $COMPONENTS; do yarn test:aura --group "$c"; done
+            for c in $COMPONENTS; do yarn test --config web-test-runner-aura.config.js --group "$c"; done
           fi
       env:
         COMPONENTS: ${{ inputs.components }}
@@ -282,6 +276,10 @@ wc-visual:
 `if: github.repository_owner == 'vaadin'` matches the fork-gate in upstream `visual-tests.yml`. Fork PRs cannot reliably reproduce visual screenshots against the workspace runner image; skipping the job (rather than failing it) keeps the `results` job green for legitimate fork contributions.
 
 The container needs `git config --global --add safe.directory` because the Playwright image runs git as a different user than the one that owns the checkout (upstream `visual-tests.yml` does the same). The explicit `git fetch origin main` mirrors upstream behavior; with `--all` passed to every test command, lerna does not actually consult `origin/main` today, but the fetch is cheap and keeps the job structurally identical to upstream — useful if `wtr-utils.js` changes in the submodule.
+
+`wc-visual` does **not** restore the workspace install cache. The `actions/cache/restore` step scopes its lookup by the OS detected at runtime, and the Playwright container's OS-detection produces a different scope than the host that saved the cache, so the restore reliably fails with `Failed to restore cache entry`. The job runs `yarn install` fresh from the registry inside the container — adds ~2-3 min to the job's wall time, well within the 90-min budget.
+
+The visual-test commands invoke `web-test-runner` directly via `yarn test --config web-test-runner-<theme>.config.js`, **not** `yarn test:base/lumo/aura`. The `yarn test:<theme>` script in `web-components/package.json` wraps each test invocation in `./scripts/run-docker-visual-tests.sh`, which provides a deterministic browser environment by launching the Playwright image via `docker run`. Inside the GHA `container:` we are already running in that image, but there is no `docker` CLI available, so the wrapper fails. Calling `yarn test --config …` bypasses the wrapper and runs the test directly — same pattern upstream `visual-tests.yml` uses.
 
 ## Components Filter Semantics
 
