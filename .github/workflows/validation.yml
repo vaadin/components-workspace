@@ -365,6 +365,66 @@ jobs:
             done
           fi
 
+  wc-unit:
+    name: WC Unit (${{ matrix.browser }})
+    needs: install
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - browser: chrome
+            cmd: yarn test
+          - browser: firefox
+            cmd: yarn test:firefox
+            playwright: firefox
+          - browser: webkit
+            cmd: yarn test:webkit
+            playwright: webkit
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Restore install cache
+        uses: actions/cache/restore@v5
+        with:
+          key: ${{ needs.install.outputs.cache-key }}
+          path: |
+            ~/.m2/repository/com/vaadin
+            node_modules
+            web-components/node_modules
+            web-components/.yarn
+            flow-components/**/node_modules
+            flow-components/vaadin-charts-flow-parent/vaadin-charts-flow-svg-generator/src/main/resources/META-INF/frontend/generated
+          fail-on-cache-miss: true
+
+      - name: Install Playwright browser
+        if: matrix.playwright
+        working-directory: web-components
+        run: npx playwright install ${{ matrix.playwright }} --with-deps
+
+      - name: Run unit tests
+        working-directory: web-components
+        env:
+          COMPONENTS: ${{ inputs.components }}
+          CMD: ${{ matrix.cmd }}
+        run: |
+          if [ -z "${COMPONENTS:-}" ]; then
+            $CMD --all
+          else
+            for c in $COMPONENTS; do
+              $CMD --group "$c"
+            done
+          fi
+
   results:
     name: Collect results
     needs: [install, unit, wtr, its]
