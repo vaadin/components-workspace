@@ -83,6 +83,8 @@ All test commands inside `web-components/` use `npm`, not `yarn`. The workspace-
 
 `web-components/package.json`'s `test:snapshots`/`test:it`/`test:firefox`/`test:webkit` scripts are thin yarn wrappers around `yarn test --config <config>.js`. The workflow does **not** call those wrappers (calling them via npm would still invoke yarn internally, which would then fail to resolve the workspace-root bins). Instead, the workflow invokes the underlying `web-test-runner` form directly: `npm test -- --config web-test-runner-<config>.config.js`.
 
+The install job applies `web-components/patches/` after `./gradlew install`. The workspace root's `.npmrc` sets `ignore-scripts=true` (because web-components' `postinstall` runs `patch-package` against its own `node_modules`, which doesn't exist when devDeps are hoisted to the workspace root). The patches are still required — at minimum, `@web+test-runner-visual-regression+0.10.0.patch` rewrites a `.mjs` extension in `index.d.ts` that TypeScript's `bundler` module resolution refuses to follow, breaking `lint:types`. The install job therefore runs `npx patch-package --patch-dir web-components/patches` once, immediately after the gradle install, so the patched state lands in the install cache and every downstream job consumes it.
+
 ## `wc-verify` — lint, snapshots, integration
 
 Single job, ~10-min budget. Runs three steps sequentially inside `web-components/`. Lint goes first because it's the fastest fail.

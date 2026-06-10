@@ -66,6 +66,10 @@ jobs:
         if: steps.cache.outputs.cache-hit != 'true'
         run: ./gradlew install --no-daemon
 
+      - name: Apply web-components patches
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: npx patch-package --patch-dir web-components/patches
+
       - name: Save install cache
         if: steps.cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v5
