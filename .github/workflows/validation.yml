@@ -162,52 +162,19 @@ jobs:
     if: needs.install.outputs.it-matrix != '' && fromJson(needs.install.outputs.it-matrix).include[0] != null
     runs-on: ubuntu-latest
     timeout-minutes: 120
-    env:
-      TB_LICENSE: ${{ secrets.TB_LICENSE }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.install.outputs.it-matrix) }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-workspace
         with:
-          submodules: recursive
-          fetch-depth: 1
+          cache-key: ${{ needs.install.outputs.cache-key }}
+          setup-java: 'true'
+          sync-overlays: 'true'
 
-      - name: Setup JDK 21
-        uses: actions/setup-java@v5
+      - uses: ./.github/actions/install-tb-license
         with:
-          java-version: '21'
-          distribution: 'temurin'
-          cache: 'maven'
-
-      - name: Setup Node
-        uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-
-      - name: Restore install cache
-        uses: actions/cache/restore@v5
-        with:
-          key: ${{ needs.install.outputs.cache-key }}
-          path: |
-            ~/.m2/repository/com/vaadin
-            node_modules
-            web-components/node_modules
-            web-components/.yarn
-            flow-components/**/node_modules
-            flow-components/vaadin-charts-flow-parent/vaadin-charts-flow-svg-generator/src/main/resources/META-INF/frontend/generated
-          fail-on-cache-miss: true
-
-      - name: Sync overlay symlinks
-        run: bash scripts/sync-flow-overlays.sh
-
-      - name: Install TestBench license
-        if: env.TB_LICENSE != ''
-        run: |
-          mkdir -p ~/.vaadin
-          user="${TB_LICENSE%%/*}"
-          key="${TB_LICENSE#*/}"
-          echo "{\"username\":\"${user}\",\"proKey\":\"${key}\"}" > ~/.vaadin/proKey
+          tb-license: ${{ secrets.TB_LICENSE }}
 
       - name: Compute artifact shard id
         id: shardid
