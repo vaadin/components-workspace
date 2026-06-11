@@ -224,30 +224,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-workspace
         with:
-          submodules: recursive
-          # depth-1 is sufficient: `npm test -- --all` short-circuits the
-          # lerna-based `getChangedPackages()` in web-components/wtr-utils.js.
-          fetch-depth: 1
-
-      - name: Setup Node
-        uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-
-      - name: Restore install cache
-        uses: actions/cache/restore@v5
-        with:
-          key: ${{ needs.install.outputs.cache-key }}
-          path: |
-            ~/.m2/repository/com/vaadin
-            node_modules
-            web-components/node_modules
-            web-components/.yarn
-            flow-components/**/node_modules
-            flow-components/vaadin-charts-flow-parent/vaadin-charts-flow-svg-generator/src/main/resources/META-INF/frontend/generated
-          fail-on-cache-miss: true
+          cache-key: ${{ needs.install.outputs.cache-key }}
 
       - name: Lint
         working-directory: web-components
@@ -257,27 +236,13 @@ jobs:
         working-directory: web-components
         env:
           COMPONENTS: ${{ inputs.components }}
-        run: |
-          if [ -z "${COMPONENTS:-}" ]; then
-            npm test -- --config web-test-runner-snapshots.config.js --all
-          else
-            for c in $COMPONENTS; do
-              npm test -- --config web-test-runner-snapshots.config.js --group "$c"
-            done
-          fi
+        run: bash ../scripts/run-wtr-config.sh web-test-runner-snapshots.config.js
 
       - name: Integration tests
         working-directory: web-components
         env:
           COMPONENTS: ${{ inputs.components }}
-        run: |
-          if [ -z "${COMPONENTS:-}" ]; then
-            npm test -- --config web-test-runner-it.config.js --all
-          else
-            for c in $COMPONENTS; do
-              npm test -- --config web-test-runner-it.config.js --group "$c"
-            done
-          fi
+        run: bash ../scripts/run-wtr-config.sh web-test-runner-it.config.js
 
   web-components-unit:
     name: Web Components Unit (${{ matrix.browser }})
