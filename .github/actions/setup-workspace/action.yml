@@ -1,0 +1,54 @@
+name: Setup workspace
+description: Common workspace prelude — checkout, Node/Java setup, install cache restore, optional overlay sync.
+
+inputs:
+  cache-key:
+    description: Install cache key; pass needs.install.outputs.cache-key from the caller.
+    required: true
+  fetch-depth:
+    description: git fetch-depth for the checkout step.
+    required: false
+    default: '1'
+  setup-java:
+    description: Set to 'true' to set up JDK 21 with Maven cache (for jobs that run Maven).
+    required: false
+    default: 'false'
+  sync-overlays:
+    description: Set to 'true' to run scripts/sync-flow-overlays.sh after cache restore.
+    required: false
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@v6
+      with:
+        submodules: recursive
+        fetch-depth: ${{ inputs.fetch-depth }}
+
+    - if: inputs.setup-java == 'true'
+      uses: actions/setup-java@v5
+      with:
+        java-version: '21'
+        distribution: 'temurin'
+        cache: 'maven'
+
+    - uses: actions/setup-node@v6
+      with:
+        node-version: '24'
+
+    - uses: actions/cache/restore@v5
+      with:
+        key: ${{ inputs.cache-key }}
+        path: |
+          ~/.m2/repository/com/vaadin
+          node_modules
+          web-components/node_modules
+          web-components/.yarn
+          flow-components/**/node_modules
+          flow-components/vaadin-charts-flow-parent/vaadin-charts-flow-svg-generator/src/main/resources/META-INF/frontend/generated
+        fail-on-cache-miss: true
+
+    - if: inputs.sync-overlays == 'true'
+      shell: bash
+      run: bash scripts/sync-flow-overlays.sh
