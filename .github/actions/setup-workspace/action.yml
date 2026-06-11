@@ -1,14 +1,10 @@
 name: Setup workspace
-description: Common workspace prelude — checkout, Node/Java setup, install cache restore, optional overlay sync.
+description: Common workspace prelude — Node/Java setup, install cache restore, optional overlay sync. Must run AFTER actions/checkout (composite actions can't host the checkout step themselves because their definition file has to be present in the working tree before GHA can resolve them).
 
 inputs:
   cache-key:
     description: Install cache key; pass needs.install.outputs.cache-key from the caller.
     required: true
-  fetch-depth:
-    description: git fetch-depth for the checkout step.
-    required: false
-    default: '1'
   setup-java:
     description: Set to 'true' to set up JDK 21 with Maven cache (for jobs that run Maven).
     required: false
@@ -21,11 +17,6 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: actions/checkout@v6
-      with:
-        submodules: recursive
-        fetch-depth: ${{ inputs.fetch-depth }}
-
     - if: inputs.setup-java == 'true'
       uses: actions/setup-java@v5
       with:

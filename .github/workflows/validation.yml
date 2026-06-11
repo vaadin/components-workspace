@@ -115,6 +115,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
       - uses: ./.github/actions/setup-workspace
         with:
           cache-key: ${{ needs.install.outputs.cache-key }}
@@ -142,6 +147,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
       - uses: ./.github/actions/setup-workspace
         with:
           cache-key: ${{ needs.install.outputs.cache-key }}
@@ -176,6 +186,11 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJson(needs.install.outputs.it-matrix) }}
     steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
       - uses: ./.github/actions/setup-workspace
         with:
           cache-key: ${{ needs.install.outputs.cache-key }}
@@ -234,6 +249,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
       - uses: ./.github/actions/setup-workspace
         with:
           cache-key: ${{ needs.install.outputs.cache-key }}
@@ -272,6 +292,11 @@ jobs:
             config: 'web-test-runner-webkit.config.js'
             playwright: webkit
     steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
       - uses: ./.github/actions/setup-workspace
         with:
           cache-key: ${{ needs.install.outputs.cache-key }}
@@ -308,6 +333,11 @@ jobs:
     steps:
       - name: Install zstd
         run: apt-get update && apt-get install -y zstd
+
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 1
 
       - uses: ./.github/actions/setup-workspace
         with:
