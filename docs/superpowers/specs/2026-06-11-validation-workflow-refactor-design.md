@@ -148,10 +148,11 @@ Used by all six downstream jobs. The six-path cache list lives only here. Per-jo
 
 ```yaml
 name: Install TestBench license
-description: Writes ~/.vaadin/proKey from the TB_LICENSE secret.
+description: Writes ~/.vaadin/proKey from the TB_LICENSE secret. Skips silently when the input is empty (e.g. fork PRs without the secret).
 
 inputs:
   tb-license:
+    description: TB_LICENSE secret value formatted as user/key.
     required: true
 
 runs:
@@ -159,21 +160,16 @@ runs:
   steps:
     - if: inputs.tb-license != ''
       shell: bash
-      run: bash scripts/install-tb-license.sh "${{ inputs.tb-license }}"
+      env:
+        TB_LICENSE: ${{ inputs.tb-license }}
+      run: |
+        mkdir -p ~/.vaadin
+        user="${TB_LICENSE%%/*}"
+        key="${TB_LICENSE#*/}"
+        printf '{"username":"%s","proKey":"%s"}\n' "$user" "$key" > ~/.vaadin/proKey
 ```
 
-Used by `flow-components-wtr` and `flow-components-its`. The bash logic moves to `scripts/install-tb-license.sh`:
-
-```bash
-#!/usr/bin/env bash
-# Writes ~/.vaadin/proKey from a TB_LICENSE-formatted string (user/key).
-set -euo pipefail
-license="$1"
-mkdir -p ~/.vaadin
-user="${license%%/*}"
-key="${license#*/}"
-printf '{"username":"%s","proKey":"%s"}\n' "$user" "$key" > ~/.vaadin/proKey
-```
+Used by `flow-components-wtr` and `flow-components-its`. The bash logic is inline in the composite — TB license setup is a pure CI concern (a developer running tests locally already has their own `~/.vaadin/proKey`), so there's no benefit to extracting a `scripts/install-tb-license.sh` file that would only ever be invoked from CI. Passing the secret via an `env:` block rather than interpolating directly into the `run:` body avoids exposing the license value in the rendered step log.
 
 ### Script: `scripts/run-wtr-config.sh` (new)
 
@@ -225,34 +221,21 @@ matrix:
       playwright: webkit
 ```
 
-### Script: `scripts/check-results.sh` (new)
+### Trailing failure check in the `results` job
 
-Replaces the trailing failure check in the `results` job. Takes `${{ toJson(needs) }}` as input, fails if any entry's `result` is `"failure"`:
-
-```bash
-#!/usr/bin/env bash
-# Reads a JSON object describing needs results (from GHA's toJson(needs))
-# and exits non-zero if any entry's `result` is "failure".
-# `skipped` and `cancelled` are not treated as failures.
-set -euo pipefail
-needs_json="$1"
-failed=$(echo "$needs_json" | jq -r '[to_entries[] | select(.value.result == "failure") | .key] | join(",")')
-if [ -n "$failed" ]; then
-  echo "Failed jobs: $failed"
-  exit 1
-fi
-echo "All needed jobs succeeded or were skipped."
-```
-
-The `results` job's failure check collapses from 6 hand-maintained lines to:
+The `results` job's failure check collapses from 6 hand-maintained `[[…]]` lines to a 3-line inline jq scan over `toJson(needs)`:
 
 ```yaml
 - name: Fail if any needed job failed
   if: always()
-  run: bash scripts/check-results.sh '${{ toJson(needs) }}'
+  run: |
+    failed=$(echo '${{ toJson(needs) }}' | jq -r '[to_entries[] | select(.value.result == "failure") | .key] | join(",")')
+    [ -z "$failed" ] || { echo "Failed jobs: $failed"; exit 1; }
 ```
 
-Any future job added to `results.needs:` is checked automatically. The existing dorny-step `outputs.conclusion` lines are removed: `needs.<job>.result` aggregates the job's outcome already, so the dorny-specific checks were redundant once a generic scan covers all of `needs`.
+Any future job added to `results.needs:` is checked automatically. The existing dorny-step `outputs.conclusion` lines are removed: `needs.<job>.result` aggregates the job's outcome already, so the dorny-specific checks were redundant once a generic scan covers all of `needs`. `skipped` and `cancelled` are not treated as failures (matching prior semantics — fork PRs that skip `web-components-visual` keep `Collect results` green).
+
+The bash logic stays inline rather than extracting to a `scripts/check-results.sh` file: it's a pure CI concern (consumes GHA's `toJson(needs)` expression that only exists inside a running workflow), and at 3 lines the inline form is already shorter than the boilerplate of a separate script + smoke test.
 
 ### Workflow-level `defaults`
 
@@ -445,6 +428,22 @@ The `install` job loses two steps (now folded into Gradle):
 
 The cache key already includes `web-components/patches/**` in `hashFiles`, so a patch change still invalidates correctly.
 
+### Terminology cleanup: `overlay` → `components` where the noun is misused
+
+A few places in the workflow and the supporting script say "overlay" when they mean "components." The word leaked in from the `flow-components-overlay/` directory's name (which is a legitimate overlay — it overlays package.json files into the flow-components IT modules), but in user-visible strings the noun being narrowed by the `components:` workflow_dispatch input is a *component*, not an overlay. The cleanup:
+
+- `.github/workflows/validation.yml` line 9: `description: '… empty = all overlay modules'` → `description: '… empty = all component modules'`.
+- `.github/workflows/validation.yml` line 104: `echo "Overlay names: $names"` → `echo "Component names: $names"`.
+- `scripts/overlay-component-names.sh` → rename to `scripts/component-names.sh`. The script reads from `flow-components-overlay/` to discover components, but its *output* is the list of component short names — naming it for the output is clearer. Update its docstring (`Emits a space-separated list of overlay short component names` → `Emits a space-separated list of component short names`; `Discovers overlays by scanning the overlay directory` → `Discovers components by scanning flow-components-overlay/`; `Overlay directory not found at` → `Component overlay directory not found at`).
+- `.github/workflows/validation.yml` line 103: update the script reference from `scripts/overlay-component-names.sh` to `scripts/component-names.sh`.
+
+What stays "overlay" — because it genuinely refers to the overlay mechanism, not to components:
+
+- `flow-components-overlay/` directory.
+- `scripts/sync-flow-overlays.sh`.
+- The `Sync overlay symlinks` step name (three occurrences, one per flow-* job).
+- `hashFiles('flow-components-overlay/**', …)` in the install cache key.
+
 ### Spec doc update
 
 `docs/superpowers/specs/2026-06-10-wc-validation-design.md` (the parent spec) currently has two narrative paragraphs in the §Shared Job Prelude region describing the patches-application and bin-symlink steps. Replace with a single sentence pointing at the Gradle finalizers in `build.gradle.kts`. The detailed rationale lives here in §Background.
@@ -468,14 +467,12 @@ The cache key already includes `web-components/patches/**` in `hashFiles`, so a 
 10. **Scripts are executable and runnable.**
     - `bash scripts/run-wtr-config.sh web-test-runner-snapshots.config.js` (from `web-components/`, COMPONENTS unset) runs the snapshot suite.
     - `COMPONENTS="grid" bash scripts/run-wtr-config.sh web-test-runner-snapshots.config.js` runs only the grid group.
-    - `bash scripts/check-results.sh '{"a":{"result":"success"},"b":{"result":"failure"}}'` exits 1 and reports `Failed jobs: b`.
-    - `bash scripts/check-results.sh '{"a":{"result":"success"},"b":{"result":"skipped"}}'` exits 0.
 
 ### In CI (push to `ci/refactor`)
 
 11. **Full pipeline green** with the composites in place, the two install steps removed, and the scripts in use.
 12. **Per-job log inspection.** The first downstream job (e.g., `flow-components-wtr`) log shows the `setup-workspace` composite resolved and ran, with the install cache restored exactly once.
-13. **Failure-check script.** Deliberately fail one job (e.g., introduce a temporary lint failure in `web-components-verify`). `results` reports `Failed jobs: web-components-verify` and exits 1; `Collect results` is red. Revert.
+13. **Failure-check aggregation.** Deliberately fail one job (e.g., introduce a temporary lint failure in `web-components-verify`). The trailing `Fail if any needed job failed` step in `results` prints `Failed jobs: web-components-verify` and exits 1; `Collect results` is red. Revert.
 14. **Gradle cache cold/warm.** First run reports a `Cache Gradle` cache miss; the `Workspace install` step downloads `gradle-8.10-bin.zip` (visible in log as `Downloading https://services.gradle.org/distributions/gradle-8.10-bin.zip`); cache is saved at job end. Second push (with `gradle-wrapper.properties` unchanged): `Cache Gradle` reports a hit and the wrapper invocation skips the download. Saves ~2-3s on warm runs.
 15. **Install-cache hit on re-push.** Confirm the patches+symlink finalizer tasks are short-circuited via Gradle's UP-TO-DATE check when the cached `node_modules/` is restored.
 

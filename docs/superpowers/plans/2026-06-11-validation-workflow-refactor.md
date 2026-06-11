@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Refactor `.github/workflows/validation.yml` to use two composite GitHub Actions and three shared shell scripts (eliminating ~100 lines of duplication), fold the two install-job postinstall steps into Gradle finalizers so `./gradlew install` is the canonical entry point, and cache the Gradle wrapper distribution and plugin metadata with a plain `actions/cache@v5` step.
+**Goal:** Refactor `.github/workflows/validation.yml` to use two composite GitHub Actions and one shared shell script (eliminating ~100 lines of duplication), fold the two install-job postinstall steps into Gradle finalizers so `./gradlew install` is the canonical entry point, and cache the Gradle wrapper distribution and plugin metadata with a plain `actions/cache@v5` step. The TB license setup and the trailing failure check stay CI-side: TB license lives inline in its composite action (no separate script — license install is meaningless locally); the failure check is a 3-line inline jq scan over `toJson(needs)` in the results job.
 
-**Architecture:** Three phases that can be executed in order without partial-state breakage: (1) Gradle integration — new shell scripts and Gradle Exec tasks for the postinstall fixes, then the CI workflow drops its two now-redundant steps. (2) Workflow refactor — new shared scripts, then composite actions, then per-job migrations. (3) Wrapper caching + parent-spec narrative update. Each task ends with a commit; CI runs on every push and gates the gate via `Collect results`.
+**Architecture:** Three phases that can be executed in order without partial-state breakage: (1) Gradle integration — new shell scripts and Gradle Exec tasks for the postinstall fixes, then the CI workflow drops its two now-redundant steps. (2) Workflow refactor — new shared script, then composite actions, then per-job migrations, then inline-jq the results aggregation. (3) Wrapper caching + parent-spec narrative update + a small terminology cleanup (rename `scripts/overlay-component-names.sh` and fix two workflow strings that say "overlay" when they mean "components"). Each task ends with a commit; CI runs on every push and gates via `Collect results`.
 
 **Tech Stack:**
 - GitHub Actions composite actions (`.github/actions/<name>/action.yml`)
@@ -384,64 +384,7 @@ EOF
 
 # Phase 2 — Workflow refactor
 
-## Task 5: Add `scripts/install-tb-license.sh`
-
-**Files:**
-- Create: `scripts/install-tb-license.sh`
-
-- [ ] **Step 1: Write the script**
-
-Create `scripts/install-tb-license.sh`:
-
-```bash
-#!/usr/bin/env bash
-# Writes ~/.vaadin/proKey from a TB_LICENSE-formatted string (user/key).
-# Usage: bash scripts/install-tb-license.sh "<user>/<key>"
-set -euo pipefail
-license="$1"
-mkdir -p ~/.vaadin
-user="${license%%/*}"
-key="${license#*/}"
-printf '{"username":"%s","proKey":"%s"}\n' "$user" "$key" > ~/.vaadin/proKey
-```
-
-- [ ] **Step 2: Make it executable**
-
-```bash
-chmod +x scripts/install-tb-license.sh
-```
-
-- [ ] **Step 3: Smoke-test with a fake license**
-
-```bash
-bash scripts/install-tb-license.sh "testuser/testkey"
-cat ~/.vaadin/proKey
-```
-
-Expected: prints `{"username":"testuser","proKey":"testkey"}`.
-
-(If you have a real `~/.vaadin/proKey` and don't want to overwrite it, skip Step 3 or back the file up first: `cp ~/.vaadin/proKey ~/.vaadin/proKey.bak`.)
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add scripts/install-tb-license.sh
-git commit -m "$(cat <<'EOF'
-chore(scripts): add install-tb-license.sh
-
-Extracts the inline bash from the two CI jobs (wtr, its) that
-parse the TB_LICENSE secret and write ~/.vaadin/proKey. Will be
-invoked from the install-tb-license composite action in the next
-commits.
-
-Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
-EOF
-)"
-```
-
----
-
-## Task 6: Add `scripts/run-wtr-config.sh`
+## Task 5: Add `scripts/run-wtr-config.sh`
 
 **Files:**
 - Create: `scripts/run-wtr-config.sh`
@@ -519,85 +462,7 @@ EOF
 
 ---
 
-## Task 7: Add `scripts/check-results.sh`
-
-**Files:**
-- Create: `scripts/check-results.sh`
-
-- [ ] **Step 1: Write the script**
-
-Create `scripts/check-results.sh`:
-
-```bash
-#!/usr/bin/env bash
-# Reads a JSON object describing needs results (from GHA's toJson(needs))
-# and exits 1 if any entry's `result` is "failure". `skipped` and
-# `cancelled` are not treated as failures.
-# Usage: bash scripts/check-results.sh '{"jobA":{"result":"success"},...}'
-set -euo pipefail
-needs_json="$1"
-failed=$(echo "$needs_json" | jq -r '[to_entries[] | select(.value.result == "failure") | .key] | join(",")')
-if [ -n "$failed" ]; then
-  echo "Failed jobs: $failed"
-  exit 1
-fi
-echo "All needed jobs succeeded or were skipped."
-```
-
-- [ ] **Step 2: Make it executable**
-
-```bash
-chmod +x scripts/check-results.sh
-```
-
-- [ ] **Step 3: Smoke-test the success path**
-
-```bash
-bash scripts/check-results.sh '{"a":{"result":"success"},"b":{"result":"skipped"}}'
-echo "exit=$?"
-```
-
-Expected:
-```
-All needed jobs succeeded or were skipped.
-exit=0
-```
-
-- [ ] **Step 4: Smoke-test the failure path**
-
-```bash
-bash scripts/check-results.sh '{"a":{"result":"success"},"b":{"result":"failure"},"c":{"result":"failure"}}' || echo "exit=$?"
-```
-
-Expected:
-```
-Failed jobs: b,c
-exit=1
-```
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add scripts/check-results.sh
-git commit -m "$(cat <<'EOF'
-chore(scripts): add check-results.sh for needs aggregation
-
-Replaces the 6-line hand-maintained failure check in the results
-job with a generic jq scan over toJson(needs). Any future job
-added to results.needs is checked automatically. skipped and
-cancelled are not treated as failures, matching the prior
-semantics (e.g. fork PRs that skip web-components-visual).
-
-Will replace the inline bash check in the next commits.
-
-Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
-EOF
-)"
-```
-
----
-
-## Task 8: Add the `setup-workspace` composite action
+## Task 6: Add the `setup-workspace` composite action
 
 **Files:**
 - Create: `.github/actions/setup-workspace/action.yml`
@@ -704,7 +569,7 @@ EOF
 
 ---
 
-## Task 9: Add the `install-tb-license` composite action
+## Task 7: Add the `install-tb-license` composite action
 
 **Files:**
 - Create: `.github/actions/install-tb-license/action.yml`
@@ -721,7 +586,7 @@ Create `.github/actions/install-tb-license/action.yml`:
 
 ```yaml
 name: Install TestBench license
-description: Writes ~/.vaadin/proKey from the TB_LICENSE secret string. Skips silently if the input is empty.
+description: Writes ~/.vaadin/proKey from the TB_LICENSE secret. Skips silently when the input is empty (e.g. fork PRs without the secret).
 
 inputs:
   tb-license:
@@ -733,8 +598,16 @@ runs:
   steps:
     - if: inputs.tb-license != ''
       shell: bash
-      run: bash scripts/install-tb-license.sh "${{ inputs.tb-license }}"
+      env:
+        TB_LICENSE: ${{ inputs.tb-license }}
+      run: |
+        mkdir -p ~/.vaadin
+        user="${TB_LICENSE%%/*}"
+        key="${TB_LICENSE#*/}"
+        printf '{"username":"%s","proKey":"%s"}\n' "$user" "$key" > ~/.vaadin/proKey
 ```
+
+Bash is inline in the composite (no separate `scripts/install-tb-license.sh`): TB license setup is meaningless locally — a developer already has their own `~/.vaadin/proKey` — so the indirection of a separate shell script earns nothing. The secret passes via `env:` rather than direct `${{ }}` interpolation in `run:`, which keeps the value out of the rendered step log.
 
 - [ ] **Step 3: Validate YAML**
 
@@ -751,10 +624,11 @@ git add .github/actions/install-tb-license/action.yml
 git commit -m "$(cat <<'EOF'
 ci: add install-tb-license composite action
 
-Wraps scripts/install-tb-license.sh and skips when the input is
-empty (so fork PRs without the secret don't trip over an empty
-license string). Used by flow-components-wtr and
-flow-components-its in subsequent commits.
+Encapsulates the ~/.vaadin/proKey write that flow-components-wtr
+and flow-components-its both need. Bash is inline because TB
+license install is a pure CI concern; no separate shell script
+to maintain. Secret passed via env rather than direct
+interpolation to keep it out of the rendered step log.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 EOF
@@ -763,7 +637,7 @@ EOF
 
 ---
 
-## Task 10: Add workflow-level `defaults: run: shell: bash`
+## Task 8: Add workflow-level `defaults: run: shell: bash`
 
 **Files:**
 - Modify: `.github/workflows/validation.yml`
@@ -827,7 +701,7 @@ EOF
 
 ---
 
-## Task 11: Migrate `flow-components-unit` to use the composite
+## Task 9: Migrate `flow-components-unit` to use the composite
 
 **Files:**
 - Modify: `.github/workflows/validation.yml` (replace the `flow-components-unit` setup prelude)
@@ -914,7 +788,7 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 
 ---
 
-## Task 12: Migrate `flow-components-wtr` to composites
+## Task 10: Migrate `flow-components-wtr` to composites
 
 **Files:**
 - Modify: `.github/workflows/validation.yml`
@@ -1017,7 +891,7 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 
 ---
 
-## Task 13: Migrate `flow-components-its` to composites
+## Task 11: Migrate `flow-components-its` to composites
 
 **Files:**
 - Modify: `.github/workflows/validation.yml`
@@ -1140,7 +1014,7 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 
 ---
 
-## Task 14: Migrate `web-components-verify` to composite + run-wtr-config
+## Task 12: Migrate `web-components-verify` to composite + run-wtr-config
 
 **Files:**
 - Modify: `.github/workflows/validation.yml`
@@ -1271,7 +1145,7 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 
 ---
 
-## Task 15: Migrate `web-components-unit` (matrix change + Run step)
+## Task 13: Migrate `web-components-unit` (matrix change + Run step)
 
 **Files:**
 - Modify: `.github/workflows/validation.yml`
@@ -1413,7 +1287,7 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 
 ---
 
-## Task 16: Migrate `web-components-visual` to composite + run-wtr-config
+## Task 14: Migrate `web-components-visual` to composite + run-wtr-config
 
 **Files:**
 - Modify: `.github/workflows/validation.yml`
@@ -1610,7 +1484,7 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 
 ---
 
-## Task 17: Migrate `results` failure check to `check-results.sh`
+## Task 15: Inline-jq the `results` failure check
 
 **Files:**
 - Modify: `.github/workflows/validation.yml` (replace the trailing failure check in the `results` job)
@@ -1638,7 +1512,9 @@ Using Edit tooling:
 ```yaml
       - name: Fail if any needed job failed
         if: always()
-        run: bash scripts/check-results.sh '${{ toJson(needs) }}'
+        run: |
+          failed=$(echo '${{ toJson(needs) }}' | jq -r '[to_entries[] | select(.value.result == "failure") | .key] | join(",")')
+          [ -z "$failed" ] || { echo "Failed jobs: $failed"; exit 1; }
 ```
 
 - [ ] **Step 2: Validate YAML**
@@ -1652,15 +1528,20 @@ python3 -c "import yaml; yaml.safe_load(open('.github/workflows/validation.yml')
 ```bash
 git add .github/workflows/validation.yml
 git commit -m "$(cat <<'EOF'
-ci: aggregate needs results via check-results.sh
+ci: aggregate needs results via inline jq over toJson(needs)
 
-Replaces the 6-line hand-maintained failure check with a single
-call to scripts/check-results.sh, which scans toJson(needs) for
-any 'failure' entry. Any future job added to results.needs is
-checked automatically — no second edit required. The dorny-step
+Replaces the 6-line hand-maintained failure check with a 3-line
+inline jq scan. Any future job added to results.needs is checked
+automatically — no second edit required. The dorny-step
 outputs.conclusion checks were redundant once needs.<job>.result
 (which aggregates the full job outcome including publish steps)
-is consulted.
+is consulted. skipped and cancelled are not treated as failures,
+matching prior semantics (e.g. fork PRs that skip
+web-components-visual keep Collect results green).
+
+Bash stays inline (no scripts/check-results.sh) because the
+check is a pure CI concern — it consumes toJson(needs), an
+expression that only exists inside a running workflow.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 EOF
@@ -1671,7 +1552,7 @@ EOF
 
 # Phase 3 — Gradle wrapper caching + parent-spec narrative
 
-## Task 18: Add `Cache Gradle` step to the install job
+## Task 16: Add `Cache Gradle` step to the install job
 
 **Files:**
 - Modify: `.github/workflows/validation.yml`
@@ -1741,7 +1622,7 @@ EOF
 
 ---
 
-## Task 19: Trim parent spec narrative
+## Task 17: Trim parent spec narrative
 
 **Files:**
 - Modify: `docs/superpowers/specs/2026-06-10-wc-validation-design.md`
@@ -1793,7 +1674,150 @@ EOF
 
 # Phase 4 — Push and verify on CI
 
-## Task 20: Push branch and verify CI green
+## Task 18: Terminology cleanup — `overlay` → `components` where misused
+
+**Files:**
+- Rename: `scripts/overlay-component-names.sh` → `scripts/component-names.sh`
+- Modify: `scripts/component-names.sh` (docstring + error message)
+- Modify: `.github/workflows/validation.yml` (input description, echo, script reference)
+
+- [ ] **Step 1: Rename the script via git**
+
+```bash
+git mv scripts/overlay-component-names.sh scripts/component-names.sh
+```
+
+- [ ] **Step 2: Update the script's docstring and error message**
+
+Using Edit tooling on `scripts/component-names.sh`:
+
+`old_string`:
+```
+# Emits a space-separated list of overlay short component names to stdout.
+#
+# Discovers overlays by scanning the overlay directory for every
+# vaadin-<name>-flow-parent/vaadin-<name>-flow-integration-tests/package.json
+# and extracting <name>.
+#
+# Env overrides:
+#   COMPONENTS  — space-separated short names to keep (e.g. "grid date-picker")
+#
+# First positional argument overrides the overlay directory
+# (default flow-components-overlay).
+```
+
+`new_string`:
+```
+# Emits a space-separated list of component short names to stdout.
+#
+# Discovers components by scanning flow-components-overlay/ for every
+# vaadin-<name>-flow-parent/vaadin-<name>-flow-integration-tests/package.json
+# and extracting <name>.
+#
+# Env overrides:
+#   COMPONENTS  — space-separated short names to keep (e.g. "grid date-picker")
+#
+# First positional argument overrides the component overlay directory
+# (default flow-components-overlay).
+```
+
+Then update the error message — `old_string`:
+```bash
+  echo "::error::Overlay directory not found at $SOURCE_DIR" >&2
+```
+
+`new_string`:
+```bash
+  echo "::error::Component overlay directory not found at $SOURCE_DIR" >&2
+```
+
+Then update the two inline comments — `old_string`:
+```bash
+# Discover all overlay short names, sorted alphabetically. nullglob lets the
+# loop skip cleanly when no overlays exist.
+```
+
+`new_string`:
+```bash
+# Discover all component short names, sorted alphabetically. nullglob lets the
+# loop skip cleanly when no components exist.
+```
+
+- [ ] **Step 3: Update the workflow's input description**
+
+Using Edit tooling on `.github/workflows/validation.yml`:
+
+`old_string`:
+```yaml
+        description: 'Space-separated names (e.g. "grid combo-box"), empty = all overlay modules'
+```
+
+`new_string`:
+```yaml
+        description: 'Space-separated names (e.g. "grid combo-box"), empty = all component modules'
+```
+
+- [ ] **Step 4: Update the script reference and echo in the install job**
+
+Using Edit tooling. `old_string`:
+```yaml
+          names=$(COMPONENTS="$COMPONENTS" bash scripts/overlay-component-names.sh)
+          echo "Overlay names: $names"
+```
+
+`new_string`:
+```yaml
+          names=$(COMPONENTS="$COMPONENTS" bash scripts/component-names.sh)
+          echo "Component names: $names"
+```
+
+- [ ] **Step 5: Verify no other references to the old script name remain**
+
+```bash
+grep -rn "overlay-component-names" .github scripts docs 2>&1
+```
+
+Expected: no output. If anything matches, update it.
+
+- [ ] **Step 6: Verify YAML still parses**
+
+```bash
+python3 -c "import yaml; yaml.safe_load(open('.github/workflows/validation.yml'))" && echo "yaml ok"
+```
+
+- [ ] **Step 7: Sanity-check the renamed script still works**
+
+```bash
+bash scripts/component-names.sh | head -1
+```
+
+Expected: a space-separated list of component short names (e.g. `accordion app-layout aura-theme avatar …`).
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add scripts/component-names.sh .github/workflows/validation.yml
+git commit -m "$(cat <<'EOF'
+refactor: rename overlay-component-names.sh → component-names.sh
+
+The word "overlay" had leaked into user-visible workflow strings
+(workflow_dispatch input description, "Overlay names:" echo) and
+into the script name itself, even though the noun being narrowed
+by the components: input is a component, not an overlay. The
+flow-components-overlay/ directory stays (it's a genuine
+overlay), but the script that *reads* from it to produce component
+names is now named for its output.
+
+Also updates the script's docstring and error message to match.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
+## Task 19: Push branch and verify CI green
 
 **Files:** (no source changes; verification only)
 
@@ -1838,7 +1862,7 @@ If any check fails, drill into the run log via `gh run view <id> --log --job <jo
 - **Composite action not found:** the path in `uses: ./.github/actions/<name>` must match the directory name exactly (`setup-workspace`, `install-tb-license`).
 - **Cache restore fails:** verify the install cache step still saves under the same key the composite expects.
 - **`scripts/run-wtr-config.sh: command not found`:** ensure the script is executable (`git ls-files --stage scripts/run-wtr-config.sh` should show mode `100755`). If it's `100644`, run `chmod +x` and re-commit.
-- **`check-results.sh` false positive:** confirm `jq` is on the runner image (it is on `ubuntu-latest`).
+- **Inline jq failure check false positive:** confirm `jq` is on the runner image (it is on `ubuntu-latest`).
 - **Gradle cache cold/warm:** on the first push the cache misses and Gradle downloads `gradle-8.10-bin.zip`. On the second push, log line `Cache restored from key: Linux-gradle-...` should appear.
 
 - [ ] **Step 5: Report status**
@@ -1851,23 +1875,24 @@ Tell the user the PR URL and confirm green. If any check is red, link the failin
 
 Cross-checked against `docs/superpowers/specs/2026-06-11-validation-workflow-refactor-design.md`:
 
-- §Goal 1 (reduce duplication) — Tasks 8–17 (composites + per-job migrations).
-- §Goal 2 (shared bash to scripts) — Tasks 5–7 + the per-job migrations.
+- §Goal 1 (reduce duplication) — Tasks 6–15 (composites + per-job migrations + results aggregation).
+- §Goal 2 (shared bash to scripts) — Task 5 (`run-wtr-config.sh`) + the per-job migrations that consume it. TB license setup and the results failure check intentionally stay CI-side (inline in composite / inline in the workflow) rather than as separate scripts; see Tasks 7 and 15 for the rationale.
 - §Goal 3 (prepare for more submodules) — implicit: the composite shape is parameterized for arbitrary submodule jobs.
 - §Goal 4 (Gradle finalizers) — Tasks 1–4.
-- §Goal 5 (Gradle cache) — Task 18.
-- §`setup-workspace` composite — Task 8.
-- §`install-tb-license` composite — Task 9.
-- §`scripts/run-wtr-config.sh` — Task 6.
-- §`scripts/check-results.sh` — Task 7.
-- §Workflow-level `defaults` — Task 10.
-- §Refactored downstream-job shape (before/after for `flow-components-wtr`) — implemented in Task 12.
+- §Goal 5 (Gradle cache) — Task 16.
+- §`setup-workspace` composite — Task 6.
+- §`install-tb-license` composite (inline bash) — Task 7.
+- §`scripts/run-wtr-config.sh` — Task 5.
+- §Inline jq failure check — Task 15.
+- §Workflow-level `defaults` — Task 8.
+- §Refactored downstream-job shape (before/after for `flow-components-wtr`) — implemented in Task 10.
 - §Gradle finalizer: patches — Tasks 1, 3.
 - §Gradle finalizer: bin symlink — Tasks 2, 3.
 - §`finalizedBy` wiring — Task 3.
-- §`Cache Gradle` step — Task 18.
+- §`Cache Gradle` step — Task 16.
 - §Install-job step removals — Task 4.
-- §Spec doc update — Task 19.
-- §Verification — Task 20 (CI) + intra-task local smoke tests on Tasks 1, 2, 3, 5, 6, 7.
+- §Spec doc update — Task 17.
+- §Terminology cleanup — Task 18.
+- §Verification — Task 19 (CI) + intra-task local smoke tests on Tasks 1, 2, 3, 5, 18.
 
 No placeholders. Every YAML edit shows exact `old_string`/`new_string`. Every script body is shown in full. Every commit message is provided. All script names match between definition (Tasks 1, 2, 5, 6, 7) and consumption (Tasks 3, 9, 14, 15, 16, 17).
