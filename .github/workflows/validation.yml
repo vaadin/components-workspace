@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       components:
-        description: 'Space-separated names (e.g. "grid combo-box"), empty = all overlay modules'
+        description: 'Space-separated names (e.g. "grid combo-box"), empty = all component modules'
         required: false
         default: ''
 
@@ -99,8 +99,8 @@ jobs:
         env:
           COMPONENTS: ${{ inputs.components }}
         run: |
-          names=$(COMPONENTS="$COMPONENTS" bash scripts/overlay-component-names.sh)
-          echo "Overlay names: $names"
+          names=$(COMPONENTS="$COMPONENTS" bash scripts/component-names.sh)
+          echo "Component names: $names"
           matrix=$(echo "$names" | bash scripts/compute-it-matrix.sh)
           echo "$matrix" | jq .
           {
