@@ -40,6 +40,13 @@ runs:
           flow-components/vaadin-charts-flow-parent/vaadin-charts-flow-svg-generator/src/main/resources/META-INF/frontend/generated
         fail-on-cache-miss: true
 
+    # Re-create the web-components/node_modules/.bin symlink. The Gradle finalizer
+    # also creates it (so `./gradlew install` is self-contained for local dev), but
+    # the GHA cache appears not to preserve the relative symlink reliably across
+    # the save/restore round-trip — this step is the defensive ensure-step.
+    - shell: bash
+      run: bash scripts/setup-web-components-bin.sh
+
     - if: inputs.sync-overlays == 'true'
       shell: bash
       run: bash scripts/sync-flow-overlays.sh
