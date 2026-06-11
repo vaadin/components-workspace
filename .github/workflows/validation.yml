@@ -296,13 +296,12 @@ jobs:
     env:
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
     steps:
-      - uses: actions/checkout@v6
+      - name: Install zstd
+        run: apt-get update && apt-get install -y zstd
+
+      - uses: ./.github/actions/setup-workspace
         with:
-          submodules: recursive
-          # depth-1 is sufficient: `npm test -- --all` short-circuits the
-          # lerna-based `getChangedPackages()` in web-components/wtr-utils.js.
-          # The explicit `git fetch origin main` below populates origin/main.
-          fetch-depth: 1
+          cache-key: ${{ needs.install.outputs.cache-key }}
 
       - name: Fix git safe directory
         run: git config --global --add safe.directory $GITHUB_WORKSPACE
@@ -310,40 +309,13 @@ jobs:
       - name: Fetch origin/main
         run: git fetch origin main
 
-      - name: Setup Node
-        uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-
-      - name: Install zstd
-        run: apt-get update && apt-get install -y zstd
-
-      - name: Restore install cache
-        uses: actions/cache/restore@v5
-        with:
-          key: ${{ needs.install.outputs.cache-key }}
-          path: |
-            ~/.m2/repository/com/vaadin
-            node_modules
-            web-components/node_modules
-            web-components/.yarn
-            flow-components/**/node_modules
-            flow-components/vaadin-charts-flow-parent/vaadin-charts-flow-svg-generator/src/main/resources/META-INF/frontend/generated
-          fail-on-cache-miss: true
-
       - name: Visual tests — base
         uses: nick-fields/retry@v3
         with:
           timeout_minutes: 20
           retry_wait_seconds: 60
           max_attempts: 3
-          command: |
-            cd web-components
-            if [ -z "${COMPONENTS:-}" ]; then
-              npm test -- --config web-test-runner-base.config.js --all
-            else
-              for c in $COMPONENTS; do npm test -- --config web-test-runner-base.config.js --group "$c"; done
-            fi
+          command: cd web-components && bash ../scripts/run-wtr-config.sh web-test-runner-base.config.js
         env:
           COMPONENTS: ${{ inputs.components }}
 
@@ -353,13 +325,7 @@ jobs:
           timeout_minutes: 20
           retry_wait_seconds: 60
           max_attempts: 3
-          command: |
-            cd web-components
-            if [ -z "${COMPONENTS:-}" ]; then
-              npm test -- --config web-test-runner-lumo.config.js --all
-            else
-              for c in $COMPONENTS; do npm test -- --config web-test-runner-lumo.config.js --group "$c"; done
-            fi
+          command: cd web-components && bash ../scripts/run-wtr-config.sh web-test-runner-lumo.config.js
         env:
           COMPONENTS: ${{ inputs.components }}
 
@@ -369,13 +335,7 @@ jobs:
           timeout_minutes: 20
           retry_wait_seconds: 60
           max_attempts: 3
-          command: |
-            cd web-components
-            if [ -z "${COMPONENTS:-}" ]; then
-              npm test -- --config web-test-runner-aura.config.js --all
-            else
-              for c in $COMPONENTS; do npm test -- --config web-test-runner-aura.config.js --group "$c"; done
-            fi
+          command: cd web-components && bash ../scripts/run-wtr-config.sh web-test-runner-aura.config.js
         env:
           COMPONENTS: ${{ inputs.components }}
 
