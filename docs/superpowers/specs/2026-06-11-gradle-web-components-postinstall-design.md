@@ -1,10 +1,14 @@
-# Gradle web-components Post-Install Design Spec
+# Workspace Install Path Improvements Design Spec
 
 ## Overview
 
-The `install` job in `.github/workflows/validation.yml` currently runs two extra steps after `./gradlew install` to finish setting up `web-components/`. Both compensate for things that `npm install` at the workspace root cannot do under the workspace's hoisting + `ignore-scripts=true` configuration, and both have been confirmed reproducible locally — a developer running `./gradlew install` followed by `cd web-components && npm test` hits the same broken state CI did before these steps were added.
+Two improvements to the workspace install path, sharing a theme of "make `./gradlew install` the single canonical entry point and make it fast":
 
-This spec moves both steps into the Gradle build as finalizers on the existing `npmInstall` task, so `./gradlew install` becomes the canonical install path for local and CI work alike. The CI workflow loses two steps; the local developer gains the same fixes for free.
+1. **Fold web-components patches and bin symlink into Gradle.** The `install` job in `.github/workflows/validation.yml` currently runs two extra steps after `./gradlew install` to finish setting up `web-components/`. Both compensate for things that `npm install` at the workspace root cannot do under the workspace's hoisting + `ignore-scripts=true` configuration, and both have been confirmed reproducible locally — a developer running `./gradlew install` followed by `cd web-components && npm test` hits the same broken state CI did before these steps were added. Moving them into Gradle finalizers makes the local install self-contained.
+
+2. **Cache the Gradle distribution and resolved plugin metadata.** The install job downloads `gradle-8.10-bin.zip` from `services.gradle.org` on every cold run (`Downloading https://services.gradle.org/distributions/gradle-8.10-bin.zip` appears in every install-job log). The Gradle wrapper's distribution and the resolved plugin metadata under `~/.gradle/caches/modules-2/` are stable inputs across runs as long as `gradle-wrapper.properties` and `build.gradle.kts` plugin declarations don't change. Caching them via the official `gradle/actions/setup-gradle@v5` action eliminates the per-run download.
+
+Both improvements touch the same install job and reinforce the same goal — they ship together.
 
 ## Goals
 
@@ -12,6 +16,7 @@ This spec moves both steps into the Gradle build as finalizers on the existing `
 2. **CI-local parity.** The validation workflow's install job stops carrying logic that exists nowhere else; the workflow YAML returns to pure orchestration.
 3. **Idempotent re-runs.** Re-running `./gradlew install` against an already-installed workspace is a no-op (Gradle's UP-TO-DATE check skips both new tasks; `patch -N` skips already-applied hunks if the check is bypassed).
 4. **Mirrors existing workspace patterns.** The new tasks follow the same shape as the existing `syncFlowOverlays` task: a thin `tasks.register<Exec>` wrapper around a shell script in `scripts/`.
+5. **Cache the Gradle distribution and plugin metadata.** Cold install-job runs no longer re-download `gradle-8.10-bin.zip` or re-resolve plugin coordinates; only the actual `npm install` and `mvn install` work has to run when the install cache misses.
 
 ## Non-Goals
 
@@ -139,9 +144,20 @@ tasks.named("npmInstall") {
 
 If a new patch file is added to `web-components/patches/`, the `inputs.dir("web-components/patches")` declaration invalidates the task automatically. The `outputs.file(…)` entries cover all currently-patched files; adding a new patch would require adding the corresponding output file to the task declaration (or the task would not detect drift on the new patched file). Today there are three patch files producing four patched-file outputs; the developer adding a fourth patch updates this list.
 
-### `.github/workflows/validation.yml` — remove two steps
+### `.github/workflows/validation.yml` — add `setup-gradle` and remove two folded steps
 
-Remove these blocks from the `install` job (currently after the `Workspace install` step):
+**Add** a `setup-gradle` step in the `install` job, immediately after `Setup Node` and before `Compute cache key`:
+
+```yaml
+- name: Setup Gradle
+  uses: gradle/actions/setup-gradle@v5
+```
+
+The default settings cache `~/.gradle/wrapper/dists` (the wrapper-downloaded Gradle distribution) and `~/.gradle/caches/modules-2` (resolved plugin coordinates and their pom/jar artifacts). The cache key is derived automatically from `gradle/wrapper/gradle-wrapper.properties` and `build.gradle.kts`/`settings.gradle.kts`, so a Gradle version bump or plugin change invalidates the cache correctly. No additional inputs to declare.
+
+Only the install job needs `setup-gradle` — downstream jobs (unit/wtr/its/wc-*) don't invoke Gradle. Keeping it scoped to install avoids unnecessary cache restore overhead on the other six jobs.
+
+**Remove** these blocks from the `install` job (currently after the `Workspace install` step):
 
 ```yaml
 - name: Apply web-components patches
@@ -179,12 +195,13 @@ Two paragraphs in the §Shared Job Prelude region describe why the install job a
 7. **Idempotent re-run.** `./gradlew install` a second time. Both tasks report `UP-TO-DATE`.
 8. **Direct `npmInstall` invocation.** `./gradlew npmInstall` alone still triggers the finalizers (verifies the `finalizedBy` wiring, not just transitive `dependsOn`).
 
-### In CI (push to `ci/wc-validation`)
+### In CI (push to `ci/refactor`)
 
 9. **Full pipeline green** with the two YAML steps removed.
 10. **No regression in install timing.** The install job's wall-clock should be unchanged or marginally faster — patches + symlink now run inside `./gradlew install`'s process rather than as separate workflow steps with their own setup overhead.
 11. **Cache hit on re-push.** A re-push that doesn't change install inputs hits the install cache; the install step (and therefore the Gradle finalizers) is skipped entirely via the existing `if: steps.cache.outputs.cache-hit != 'true'` gate on the `Workspace install` step.
 12. **Cache miss after patch change.** Adding or modifying a file in `web-components/patches/` invalidates the cache (via `hashFiles('web-components/patches/**')`), forces a fresh install, and the finalizer tasks re-run successfully.
+13. **Gradle distribution cache cold-then-warm.** First run after the change: `Setup Gradle` reports cache miss and downloads `gradle-8.10-bin.zip` (visible in log as `Downloading https://services.gradle.org/distributions/gradle-8.10-bin.zip`); cache is saved at job end. Second push (cache key derived from unchanged `gradle-wrapper.properties` and Gradle build files): `Setup Gradle` reports cache hit, no download, and the `Workspace install` step's gradle invocation goes straight to executing tasks. Saves ~2-3s on warm runs.
 
 ## Future Work
 
@@ -198,7 +215,9 @@ Two paragraphs in the §Shared Job Prelude region describe why the install job a
 - `gradle/flow-components.gradle.kts` — defines `syncFlowOverlays`, the pattern this spec mirrors.
 - `scripts/sync-flow-overlays.sh` — the shape `apply-web-components-patches.sh` and `setup-web-components-bin.sh` follow.
 - `.npmrc` (workspace root) — explains why `ignore-scripts=true` is set and why patches must be applied separately.
-- `.github/workflows/validation.yml` — the workflow losing two install-job steps.
+- `.github/workflows/validation.yml` — the workflow losing two install-job steps and gaining a `setup-gradle` step.
+- `gradle/wrapper/gradle-wrapper.properties` — pins the Gradle distribution URL; `setup-gradle`'s cache key derives from this file.
+- `gradle/actions/setup-gradle@v5` — Gradle's official action for setting up the wrapper, caching distributions and dependencies. Recommended over manual `actions/cache` for `~/.gradle`.
 - `docs/superpowers/specs/2026-06-10-wc-validation-design.md` — the parent spec describing the validation workflow; this spec amends its narrative.
 - `web-components/patches/` — the patches dir applied by this design.
 - `web-components/wtr-utils.js:59` — the file with the hardcoded `./node_modules/.bin/lerna` lookup the symlink compensates for.
