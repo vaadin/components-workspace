@@ -471,14 +471,8 @@ jobs:
               gh api -X DELETE "repos/$GH_REPO/actions/artifacts/$id" || true
             done
 
-      - name: Fail if any test failed
+      - name: Fail if any needed job failed
         if: always()
         run: |
-          failed=false
-          [[ "${{ steps.unit-dorny.outputs.conclusion }}" == "failure" ]] && failed=true
-          [[ "${{ steps.wtr-dorny.outputs.conclusion }}"  == "failure" ]] && failed=true
-          [[ "${{ steps.it-dorny.outputs.conclusion }}"   == "failure" ]] && failed=true
-          [[ "${{ needs.web-components-verify.result }}" == "failure" ]] && failed=true
-          [[ "${{ needs.web-components-unit.result }}"   == "failure" ]] && failed=true
-          [[ "${{ needs.web-components-visual.result }}" == "failure" ]] && failed=true
-          [[ "$failed" == "true" ]] && exit 1 || exit 0
+          failed=$(echo '${{ toJson(needs) }}' | jq -r '[to_entries[] | select(.value.result == "failure") | .key] | join(",")')
+          [ -z "$failed" ] || { echo "Failed jobs: $failed"; exit 1; }
