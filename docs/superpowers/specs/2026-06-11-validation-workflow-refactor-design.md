@@ -6,7 +6,7 @@
 
 This spec refactors the workflow to push shared setup into composite GitHub Actions under `.github/actions/`, shared bash into real scripts under `scripts/`, and a workflow-level `defaults` block at the top. Each downstream job's body drops to ~10-15 lines focused on the test invocation itself. Adding a new submodule's jobs becomes "copy a small template, swap the test commands" rather than reproducing the prelude.
 
-Along the way the spec folds two install-job steps (web-components patches and bin symlink) into Gradle finalizers — both are reproducible locally and aren't CI-specific — and adds Gradle wrapper caching via `setup-gradle@v5`. These improvements touch the same install path and reinforce the same goal of making `./gradlew install` the canonical, self-contained, fast workspace setup. They ship together with the refactor.
+Along the way the spec folds two install-job steps (web-components patches and bin symlink) into Gradle finalizers — both are reproducible locally and aren't CI-specific — and caches the Gradle wrapper distribution and plugin metadata via a plain `actions/cache@v5` step. These improvements touch the same install path and reinforce the same goal of making `./gradlew install` the canonical, self-contained, fast workspace setup. They ship together with the refactor.
 
 ## Goals
 
@@ -410,15 +410,27 @@ tasks.named("npmInstall") {
 
 `finalizedBy` ensures the post-install tasks run whether `npmInstall` is invoked directly (`./gradlew npmInstall`) or transitively (`./gradlew install`). Neither task is `@Cacheable` — outputs are filesystem-specific (a relative symlink; patched files in `node_modules/`).
 
-### `setup-gradle` in the install job
+### Cache the Gradle wrapper distribution and plugin metadata
 
-In `validation.yml`'s install job, immediately after `Setup Node` (the install job retains its inline setup steps; it's the cache-creating job and doesn't use the `setup-workspace` composite, which is for cache-restoring jobs):
+In `validation.yml`'s install job, before the `Workspace install` step (which invokes `./gradlew`), add a plain `actions/cache@v5` step that restores and saves the Gradle home directory's two cache subdirectories:
 
 ```yaml
-- uses: gradle/actions/setup-gradle@v5
+- name: Cache Gradle
+  uses: actions/cache@v5
+  with:
+    path: |
+      ~/.gradle/wrapper/dists
+      ~/.gradle/caches/modules-2
+    key: ${{ runner.os }}-gradle-${{ hashFiles('gradle/wrapper/gradle-wrapper.properties', 'build.gradle.kts', 'settings.gradle.kts', 'gradle/*.gradle.kts') }}
+    restore-keys: |
+      ${{ runner.os }}-gradle-
 ```
 
-Defaults cache `~/.gradle/wrapper/dists` (the Gradle distribution download) and `~/.gradle/caches/modules-2` (resolved plugin coordinates). Cache key is derived automatically from `gradle/wrapper/gradle-wrapper.properties` and the build files; cache invalidates correctly on Gradle bumps or plugin changes. Scoped to the install job only — downstream jobs don't run Gradle.
+`~/.gradle/wrapper/dists` holds the downloaded Gradle distribution (`gradle-8.10-bin.zip` unpacked); `~/.gradle/caches/modules-2` holds resolved plugin coordinates and their pom/jar artifacts. The cache key invalidates correctly when `gradle-wrapper.properties` (Gradle version), `build.gradle.kts` (plugin declarations), `settings.gradle.kts`, or any of the subproject `gradle/*.gradle.kts` files change. The `restore-keys` fallback allows partial reuse when only one of those inputs changes — the cache still restores most of the content and Gradle re-resolves the changed plugin only.
+
+**Why not `gradle/actions/setup-gradle`:** v5.0.2 (the last MIT-licensed line) works, but its caching is more elaborate than we need (daemon reuse across jobs, build-cache management, wrapper signature validation as a step). v6.0.0+ extracted the caching into a proprietary `gradle-actions-caching` component that requires accepting [Gradle Inc.'s Terms of Use](https://gradle.com/legal/terms-of-use/). A plain `actions/cache@v5` step matches the rest of the workflow's cache pattern, stays fully open-source, and is the minimum needed to skip the per-run `gradle-8.10-bin.zip` download.
+
+Scoped to the install job only — downstream jobs don't run Gradle.
 
 ### Install-job step removals
 
@@ -464,7 +476,7 @@ The cache key already includes `web-components/patches/**` in `hashFiles`, so a 
 11. **Full pipeline green** with the composites in place, the two install steps removed, and the scripts in use.
 12. **Per-job log inspection.** The first downstream job (e.g., `flow-components-wtr`) log shows the `setup-workspace` composite resolved and ran, with the install cache restored exactly once.
 13. **Failure-check script.** Deliberately fail one job (e.g., introduce a temporary lint failure in `web-components-verify`). `results` reports `Failed jobs: web-components-verify` and exits 1; `Collect results` is red. Revert.
-14. **`setup-gradle` cold/warm.** First run reports a `Setup Gradle` cache miss and downloads `gradle-8.10-bin.zip`. Second push (with `gradle-wrapper.properties` unchanged): cache hit, no download. Saves ~2-3s on warm runs.
+14. **Gradle cache cold/warm.** First run reports a `Cache Gradle` cache miss; the `Workspace install` step downloads `gradle-8.10-bin.zip` (visible in log as `Downloading https://services.gradle.org/distributions/gradle-8.10-bin.zip`); cache is saved at job end. Second push (with `gradle-wrapper.properties` unchanged): `Cache Gradle` reports a hit and the wrapper invocation skips the download. Saves ~2-3s on warm runs.
 15. **Install-cache hit on re-push.** Confirm the patches+symlink finalizer tasks are short-circuited via Gradle's UP-TO-DATE check when the cached `node_modules/` is restored.
 
 ## Future Work
@@ -482,8 +494,8 @@ The cache key already includes `web-components/patches/**` in `hashFiles`, so a 
 - `gradle/flow-components.gradle.kts` — defines `syncFlowOverlays`, the existing pattern the new Gradle tasks mirror.
 - `scripts/sync-flow-overlays.sh` — shape model for the new shell scripts.
 - `.npmrc` (workspace root) — explains why `ignore-scripts=true` is set and why patches must be applied externally.
-- `gradle/wrapper/gradle-wrapper.properties` — pins the Gradle distribution URL; `setup-gradle`'s cache key derives from this file.
-- `gradle/actions/setup-gradle@v5` — Gradle's official action for caching the wrapper distribution and plugin metadata.
+- `gradle/wrapper/gradle-wrapper.properties` — pins the Gradle distribution URL; the `Cache Gradle` step's key derives from this file plus the build scripts.
+- [gradle/actions v6.0.0 release notes](https://github.com/gradle/actions/releases/tag/v6.0.0) — describes the licensing change that made the proprietary `gradle-actions-caching` component a dependency of `setup-gradle@v6`, motivating the plain `actions/cache@v5` approach.
 - `docs/superpowers/specs/2026-06-10-wc-validation-design.md` — the parent spec; this spec amends its narrative around the install job.
 - `web-components/patches/` — the patches dir applied by the Gradle finalizer.
 - `web-components/wtr-utils.js:59` — the hardcoded `./node_modules/.bin/lerna` lookup the symlink finalizer compensates for.
