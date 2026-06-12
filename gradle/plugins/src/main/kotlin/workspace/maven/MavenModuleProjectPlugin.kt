@@ -31,14 +31,19 @@ class MavenModuleProjectPlugin : Plugin<Project> {
         project.extensions.add("mavenModel", model)
 
         project.plugins.withId("java") {
+            // Mirror Maven's flat `target/classes` and `target/test-classes` layout, but
+            // route compiled classes and processed resources to sibling sub-folders so
+            // Gradle 8's strict implicit-dependency check is satisfied (compileJava and
+            // processResources would otherwise share an output directory). Both folders
+            // are still on each downstream classpath via the source-set output.
             project.extensions.configure(org.gradle.api.tasks.SourceSetContainer::class.java) {
                 named("main") {
-                    java.destinationDirectory.set(project.file("target/classes"))
-                    output.setResourcesDir(project.file("target/classes"))
+                    java.destinationDirectory.set(project.file("target/classes/java"))
+                    output.setResourcesDir(project.file("target/classes/resources"))
                 }
                 named("test") {
-                    java.destinationDirectory.set(project.file("target/test-classes"))
-                    output.setResourcesDir(project.file("target/test-classes"))
+                    java.destinationDirectory.set(project.file("target/test-classes/java"))
+                    output.setResourcesDir(project.file("target/test-classes/resources"))
                 }
             }
             project.tasks.named("jar", org.gradle.api.tasks.bundling.Jar::class.java) {
@@ -52,10 +57,19 @@ class MavenModuleProjectPlugin : Plugin<Project> {
             project.plugins.apply("maven-publish")
             project.extensions.configure(org.gradle.api.publish.PublishingExtension::class.java) {
                 publications.create("maven", org.gradle.api.publish.maven.MavenPublication::class.java) {
-                    from(project.components.getByName("java"))
+                    // The component to publish (java vs. web) is decided lazily — afterEvaluate
+                    // ensures the war plugin (if any) has been applied so we pick the correct one.
                     groupId = model.groupId
                     artifactId = model.artifactId
                     version = model.version
+                }
+            }
+            project.afterEvaluate {
+                project.extensions.configure(org.gradle.api.publish.PublishingExtension::class.java) {
+                    publications.named("maven", org.gradle.api.publish.maven.MavenPublication::class.java) {
+                        val componentName = if (project.plugins.hasPlugin("war")) "web" else "java"
+                        from(project.components.getByName(componentName))
+                    }
                 }
             }
         }
@@ -64,11 +78,10 @@ class MavenModuleProjectPlugin : Plugin<Project> {
                 destinationDirectory.set(project.file("target"))
                 archiveBaseName.set(model.artifactId)
                 archiveVersion.set(model.version)
-            }
-            project.extensions.configure(org.gradle.api.publish.PublishingExtension::class.java) {
-                publications.named("maven", org.gradle.api.publish.maven.MavenPublication::class.java) {
-                    from(project.components.getByName("web"))
-                }
+                // IT classpaths often pull the same jar via several routes (e.g. once
+                // through `vaadin-button-flow`, again through `vaadin-flow-components-test-util`).
+                // Maven dedupes silently; Gradle 8 demands an explicit strategy.
+                duplicatesStrategy = org.gradle.api.file.DuplicatesStrategy.EXCLUDE
             }
         }
 

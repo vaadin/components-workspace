@@ -2,6 +2,11 @@ import java.io.File
 
 pluginManagement {
     includeBuild("gradle/plugins")
+    repositories {
+        gradlePluginPortal()
+        mavenLocal()
+        maven { url = uri("https://maven.vaadin.com/vaadin-prereleases/") }
+    }
 }
 
 rootProject.name = "components-workspace"
