@@ -15,6 +15,7 @@ dependencies {
     implementation("org.apache.maven.resolver:maven-resolver-impl:1.9.22")
     implementation("org.apache.maven.resolver:maven-resolver-connector-basic:1.9.22")
     implementation("org.apache.maven.resolver:maven-resolver-transport-http:1.9.22")
+    implementation("com.diffplug.spotless:spotless-plugin-gradle:6.25.0")
 
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
@@ -48,6 +49,10 @@ gradlePlugin {
         register("workspaceMavenModule") {
             id = "workspace.maven-module"
             implementationClass = "workspace.maven.MavenModuleProjectPlugin"
+        }
+        register("vaadinWorkspaceJavaLibrary") {
+            id = "vaadin.workspace.java-library"
+            implementationClass = "vaadin.workspace.JavaLibraryConventionPlugin"
         }
     }
     testSourceSets(functionalTest)
