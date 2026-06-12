@@ -124,7 +124,9 @@ class NetworkModelResolver : ModelResolver {
     override fun addRepository(repository: MavenRepoModel) = addRepository(repository, false)
 
     override fun addRepository(repository: MavenRepoModel, replace: Boolean) {
-        if (additionalRepos.any { it.id == repository.id } && !replace) return
+        val existing = additionalRepos.any { it.id == repository.id }
+        if (existing && !replace) return
+        if (existing) additionalRepos.removeIf { it.id == repository.id }
         additionalRepos.add(
             RemoteRepository.Builder(repository.id, "default", repository.url).build()
         )
