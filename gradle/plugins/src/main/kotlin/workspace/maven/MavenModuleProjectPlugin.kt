@@ -1,7 +1,9 @@
 package workspace.maven
 
+import org.gradle.api.Action
 import org.gradle.api.Plugin
 import org.gradle.api.Project
+import org.gradle.api.invocation.Gradle
 import java.net.URI
 
 class MavenModuleProjectPlugin : Plugin<Project> {
@@ -70,6 +72,47 @@ class MavenModuleProjectPlugin : Plugin<Project> {
             }
         }
 
-        // maven-publish and deferred dep wiring are added in later tasks.
+        // Defer cross-project dep wiring until all subprojects have registered their GAVs.
+        val extras = project.gradle.extensions
+        if (extras.findByName("mavenModuleDepsHookInstalled") == null) {
+            extras.add("mavenModuleDepsHookInstalled", true)
+            val depWiringAction = object : Action<Gradle> {
+                override fun execute(gradle: Gradle) {
+                    registry.get().finalize()
+                    val mapper = DependencyMapper(registry.get())
+                    gradle.rootProject.allprojects.forEach { p: Project ->
+                        val pModel = p.extensions.findByName("mavenModel") as? MavenModel ?: return@forEach
+                        // Pom-packaging / no-java projects (e.g. the :flow-components aggregator) don't expose
+                        // implementation/testImplementation configurations — skip dep wiring for them.
+                        if (!p.plugins.hasPlugin("java")) return@forEach
+                        pModel.dependencyManagement
+                            .filter { it.scope == "import" && it.type == "pom" }
+                            .forEach { dep ->
+                                val spec = mapper.mapBomImport(dep) as GradleDependencySpec.Platform
+                                p.dependencies.add(spec.configuration, p.dependencies.platform(spec.coordinate))
+                            }
+                        pModel.dependencies.forEach depLoop@{ dep ->
+                            if (dep.scope == "provided") {
+                                mapper.mapProvided(dep).forEach { spec ->
+                                    p.dependencies.add(spec.configuration, (spec as GradleDependencySpec.External).coordinate)
+                                }
+                                return@depLoop
+                            }
+                            if (dep.scope == "import" && dep.type == "pom") return@depLoop
+                            val spec = mapper.map(dep)
+                            when (spec) {
+                                is GradleDependencySpec.ProjectRef ->
+                                    p.dependencies.add(spec.configuration, p.project(spec.projectPath))
+                                is GradleDependencySpec.External ->
+                                    p.dependencies.add(spec.configuration, spec.coordinate)
+                                is GradleDependencySpec.Platform ->
+                                    p.dependencies.add(spec.configuration, p.dependencies.platform(spec.coordinate))
+                            }
+                        }
+                    }
+                }
+            }
+            project.gradle.projectsEvaluated(depWiringAction)
+        }
     }
 }
