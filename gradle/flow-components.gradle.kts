@@ -12,11 +12,23 @@ tasks.register("install") {
 }
 
 tasks.register<Exec>("build") {
-    description = "Runs `mvn -DskipTests install` in the flow-components submodule."
+    description = "Pilot modules via Gradle (publishToMavenLocal), then mvn -DskipTests install on the whole flow-components reactor."
     group = "build"
     workingDir = projectDir
     commandLine(mvnCommand, "-DskipTests", "install")
     dependsOn("install")
+}
+
+gradle.projectsEvaluated {
+    tasks.named("build").configure {
+        dependsOn(rootProject.subprojects
+            .filter { it.path.startsWith(":flow-components:") }
+            .filter {
+                it.plugins.hasPlugin("vaadin.workspace.java-library") ||
+                it.plugins.hasPlugin("vaadin.workspace.integration-tests")
+            }
+            .map { "${it.path}:publishToMavenLocal" })
+    }
 }
 
 tasks.register<Exec>("test") {
@@ -42,5 +54,5 @@ val syncFlowOverlays = tasks.register<Exec>("syncFlowOverlays") {
 }
 
 tasks.named("install") {
-    dependsOn(syncFlowOverlays)
+    dependsOn(syncFlowOverlays, ":npmInstall")
 }
