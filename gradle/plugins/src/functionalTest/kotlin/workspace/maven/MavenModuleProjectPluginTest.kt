@@ -78,8 +78,8 @@ class MavenModuleProjectPluginTest {
             .build()
 
         val targetDir = File(projectDir, "target")
-        assertTrue(File(targetDir, "classes/com/example/Hello.class").exists(),
-            "Compiled class should be under target/classes/")
+        assertTrue(File(targetDir, "classes/java/com/example/Hello.class").exists(),
+            "Compiled class should be under target/classes/java/")
         assertTrue(File(targetDir, "fixture-1.0.0.jar").exists(),
             "Jar should be at target/fixture-1.0.0.jar")
     }
