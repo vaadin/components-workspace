@@ -28,6 +28,34 @@ class MavenModuleProjectPlugin : Plugin<Project> {
         // 2. Expose the parsed model for build files and Layer 2 conventions to read.
         project.extensions.add("mavenModel", model)
 
-        // Output redirection, maven-publish, and deferred dep wiring are added in later tasks.
+        project.plugins.withId("java") {
+            project.extensions.configure(org.gradle.api.tasks.SourceSetContainer::class.java) {
+                named("main") {
+                    java.destinationDirectory.set(project.file("target/classes"))
+                    output.setResourcesDir(project.file("target/classes"))
+                }
+                named("test") {
+                    java.destinationDirectory.set(project.file("target/test-classes"))
+                    output.setResourcesDir(project.file("target/test-classes"))
+                }
+            }
+            project.tasks.named("jar", org.gradle.api.tasks.bundling.Jar::class.java) {
+                destinationDirectory.set(project.file("target"))
+                archiveBaseName.set(model.artifactId)
+                archiveVersion.set(model.version)
+            }
+            project.tasks.named("clean", org.gradle.api.tasks.Delete::class.java) {
+                delete(project.file("target"))
+            }
+        }
+        project.plugins.withId("war") {
+            project.tasks.named("war", org.gradle.api.tasks.bundling.War::class.java) {
+                destinationDirectory.set(project.file("target"))
+                archiveBaseName.set(model.artifactId)
+                archiveVersion.set(model.version)
+            }
+        }
+
+        // maven-publish and deferred dep wiring are added in later tasks.
     }
 }
