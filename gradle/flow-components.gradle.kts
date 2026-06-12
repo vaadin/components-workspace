@@ -1,5 +1,9 @@
 import org.gradle.internal.os.OperatingSystem
 
+plugins {
+    id("workspace.maven-module")
+}
+
 val mvnCommand = if (OperatingSystem.current().isWindows) "mvn.cmd" else "mvn"
 
 tasks.register("install") {
