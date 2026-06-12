@@ -41,4 +41,17 @@ class PomReaderTest {
         val model = PomReader().read(fixture("simple.xml"))
         assertEquals(listOf("https://repo.example.com"), model.repositories.map { it.url })
     }
+
+    @Test
+    fun `resolves external parent POM transparently`() {
+        // Use the actual flow-components root POM, which has vaadin-parent as external parent.
+        val pomFile = Paths.get("../../flow-components/pom.xml").toFile()
+        if (!pomFile.exists()) return  // skip if submodule not checked out
+
+        val model = PomReader().read(pomFile)
+        // vaadin-parent contributes the prereleases repo via inheritance.
+        val urls = model.repositories.map { it.url }
+        assertTrue(urls.any { it.contains("vaadin-prereleases") },
+            "Expected vaadin-prereleases in resolved repositories: $urls")
+    }
 }

@@ -11,7 +11,9 @@ repositories {
 
 dependencies {
     implementation("org.apache.maven:maven-model-builder:3.9.9")
+    implementation("org.apache.maven:maven-resolver-provider:3.9.9")
     implementation("org.apache.maven.resolver:maven-resolver-impl:1.9.22")
+    implementation("org.apache.maven.resolver:maven-resolver-connector-basic:1.9.22")
     implementation("org.apache.maven.resolver:maven-resolver-transport-http:1.9.22")
 
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
