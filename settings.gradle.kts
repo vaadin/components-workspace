@@ -1,3 +1,7 @@
+pluginManagement {
+    includeBuild("gradle/plugins")
+}
+
 rootProject.name = "components-workspace"
 
 include(":web-components", ":flow-components")
