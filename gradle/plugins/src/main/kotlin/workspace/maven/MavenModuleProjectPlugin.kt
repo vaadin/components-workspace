@@ -47,12 +47,26 @@ class MavenModuleProjectPlugin : Plugin<Project> {
             project.tasks.named("clean", org.gradle.api.tasks.Delete::class.java) {
                 delete(project.file("target"))
             }
+            project.plugins.apply("maven-publish")
+            project.extensions.configure(org.gradle.api.publish.PublishingExtension::class.java) {
+                publications.create("maven", org.gradle.api.publish.maven.MavenPublication::class.java) {
+                    from(project.components.getByName("java"))
+                    groupId = model.groupId
+                    artifactId = model.artifactId
+                    version = model.version
+                }
+            }
         }
         project.plugins.withId("war") {
             project.tasks.named("war", org.gradle.api.tasks.bundling.War::class.java) {
                 destinationDirectory.set(project.file("target"))
                 archiveBaseName.set(model.artifactId)
                 archiveVersion.set(model.version)
+            }
+            project.extensions.configure(org.gradle.api.publish.PublishingExtension::class.java) {
+                publications.named("maven", org.gradle.api.publish.maven.MavenPublication::class.java) {
+                    from(project.components.getByName("web"))
+                }
             }
         }
 
