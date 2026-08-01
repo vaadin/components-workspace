@@ -45,9 +45,10 @@ jobs:
 
       - name: Compute cache key
         id: key
-        env:
-          KEY: ${{ runner.os }}-workspace-install-${{ hashFiles('package.json', 'package-lock.json', 'flow-components-overlay/**', 'web-components/yarn.lock', 'gradle/**', 'build.gradle.kts', 'settings.gradle.kts') }}-${{ github.sha }}
-        run: echo "value=$KEY" >> "$GITHUB_OUTPUT"
+        run: |
+          gitlinks=$(git ls-files -s flow-components web-components | sha256sum | cut -c1-16)
+          inputs="${{ hashFiles('package.json', 'package-lock.json', 'flow-components-overlay/**', 'web-components/yarn.lock', 'web-components/patches/**', 'gradle/**', 'build.gradle.kts', 'settings.gradle.kts', '.github/workflows/validation.yml') }}"
+          echo "value=${{ runner.os }}-workspace-install-${inputs}-${gitlinks}" >> "$GITHUB_OUTPUT"
 
       - name: Restore install cache (skip work if hit)
         id: cache
@@ -65,6 +66,21 @@ jobs:
       - name: Workspace install
         if: steps.cache.outputs.cache-hit != 'true'
         run: ./gradlew install --no-daemon
+
+      - name: Apply web-components patches
+        if: steps.cache.outputs.cache-hit != 'true'
+        working-directory: web-components
+        run: |
+          for p in patches/*.patch; do
+            echo "Applying $p"
+            patch -p1 -d .. < "$p"
+          done
+
+      - name: Symlink web-components/node_modules/.bin to workspace root
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p web-components/node_modules
+          ln -snf ../../node_modules/.bin web-components/node_modules/.bin
 
       - name: Save install cache
         if: steps.cache.outputs.cache-hit != 'true'
@@ -94,8 +110,8 @@ jobs:
             echo 'EOF'
           } >> "$GITHUB_OUTPUT"
 
-  unit:
-    name: Unit Tests
+  flow-components-unit:
+    name: Flow Components Unit Tests
     needs: install
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -148,8 +164,8 @@ jobs:
           retention-days: 1
           if-no-files-found: ignore
 
-  wtr:
-    name: WTR Tests
+  flow-components-wtr:
+    name: Flow Components WTR Tests
     needs: install
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -211,8 +227,8 @@ jobs:
           retention-days: 1
           if-no-files-found: ignore
 
-  its:
-    name: IT ${{ matrix.shard }}
+  flow-components-its:
+    name: Flow Components IT ${{ matrix.shard }}
     needs: [install]
     if: needs.install.outputs.it-matrix != '' && fromJson(needs.install.outputs.it-matrix).include[0] != null
     runs-on: ubuntu-latest
@@ -306,9 +322,248 @@ jobs:
           retention-days: 5
           if-no-files-found: ignore
 
+  web-components-verify:
+    name: Web Components Verify
+    needs: install
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          # depth-1 is sufficient: `npm test -- --all` short-circuits the
+          # lerna-based `getChangedPackages()` in web-components/wtr-utils.js.
+          fetch-depth: 1
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Restore install cache
+        uses: actions/cache/restore@v5
+        with:
+          key: ${{ needs.install.outputs.cache-key }}
+          path: |
+            ~/.m2/repository/com/vaadin
+            node_modules
+            web-components/node_modules
+            web-components/.yarn
+            flow-components/**/node_modules
+            flow-components/vaadin-charts-flow-parent/vaadin-charts-flow-svg-generator/src/main/resources/META-INF/frontend/generated
+          fail-on-cache-miss: true
+
+      - name: Lint
+        working-directory: web-components
+        run: npm run lint
+
+      - name: Snapshot tests
+        working-directory: web-components
+        env:
+          COMPONENTS: ${{ inputs.components }}
+        run: |
+          if [ -z "${COMPONENTS:-}" ]; then
+            npm test -- --config web-test-runner-snapshots.config.js --all
+          else
+            for c in $COMPONENTS; do
+              npm test -- --config web-test-runner-snapshots.config.js --group "$c"
+            done
+          fi
+
+      - name: Integration tests
+        working-directory: web-components
+        env:
+          COMPONENTS: ${{ inputs.components }}
+        run: |
+          if [ -z "${COMPONENTS:-}" ]; then
+            npm test -- --config web-test-runner-it.config.js --all
+          else
+            for c in $COMPONENTS; do
+              npm test -- --config web-test-runner-it.config.js --group "$c"
+            done
+          fi
+
+  web-components-unit:
+    name: Web Components Unit (${{ matrix.browser }})
+    needs: install
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - browser: chrome
+            cmd: npm test --
+          - browser: firefox
+            cmd: npm test -- --config web-test-runner-firefox.config.js
+            playwright: firefox
+          - browser: webkit
+            cmd: npm test -- --config web-test-runner-webkit.config.js
+            playwright: webkit
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          # depth-1 is sufficient: `npm test -- --all` short-circuits the
+          # lerna-based `getChangedPackages()` in web-components/wtr-utils.js.
+          fetch-depth: 1
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Restore install cache
+        uses: actions/cache/restore@v5
+        with:
+          key: ${{ needs.install.outputs.cache-key }}
+          path: |
+            ~/.m2/repository/com/vaadin
+            node_modules
+            web-components/node_modules
+            web-components/.yarn
+            flow-components/**/node_modules
+            flow-components/vaadin-charts-flow-parent/vaadin-charts-flow-svg-generator/src/main/resources/META-INF/frontend/generated
+          fail-on-cache-miss: true
+
+      - name: Cache Playwright browsers
+        if: matrix.playwright
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ matrix.playwright }}-${{ hashFiles('web-components/yarn.lock') }}
+
+      - name: Install Playwright browser
+        if: matrix.playwright
+        working-directory: web-components
+        run: npx playwright install ${{ matrix.playwright }} --with-deps
+
+      - name: Run unit tests
+        working-directory: web-components
+        env:
+          COMPONENTS: ${{ inputs.components }}
+          CMD: ${{ matrix.cmd }}
+        run: |
+          if [ -z "${COMPONENTS:-}" ]; then
+            $CMD --all
+          else
+            for c in $COMPONENTS; do
+              $CMD --group "$c"
+            done
+          fi
+
+  web-components-visual:
+    name: Web Components Visual
+    needs: install
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    if: github.repository_owner == 'vaadin'
+    container:
+      image: mcr.microsoft.com/playwright:v1.60.0-noble
+      options: --ipc=host
+    env:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          # depth-1 is sufficient: `npm test -- --all` short-circuits the
+          # lerna-based `getChangedPackages()` in web-components/wtr-utils.js.
+          # The explicit `git fetch origin main` below populates origin/main.
+          fetch-depth: 1
+
+      - name: Fix git safe directory
+        run: git config --global --add safe.directory $GITHUB_WORKSPACE
+
+      - name: Fetch origin/main
+        run: git fetch origin main
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Install zstd
+        run: apt-get update && apt-get install -y zstd
+
+      - name: Restore install cache
+        uses: actions/cache/restore@v5
+        with:
+          key: ${{ needs.install.outputs.cache-key }}
+          path: |
+            ~/.m2/repository/com/vaadin
+            node_modules
+            web-components/node_modules
+            web-components/.yarn
+            flow-components/**/node_modules
+            flow-components/vaadin-charts-flow-parent/vaadin-charts-flow-svg-generator/src/main/resources/META-INF/frontend/generated
+          fail-on-cache-miss: true
+
+      - name: Visual tests — base
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 20
+          retry_wait_seconds: 60
+          max_attempts: 3
+          command: |
+            cd web-components
+            if [ -z "${COMPONENTS:-}" ]; then
+              npm test -- --config web-test-runner-base.config.js --all
+            else
+              for c in $COMPONENTS; do npm test -- --config web-test-runner-base.config.js --group "$c"; done
+            fi
+        env:
+          COMPONENTS: ${{ inputs.components }}
+
+      - name: Visual tests — Lumo
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 20
+          retry_wait_seconds: 60
+          max_attempts: 3
+          command: |
+            cd web-components
+            if [ -z "${COMPONENTS:-}" ]; then
+              npm test -- --config web-test-runner-lumo.config.js --all
+            else
+              for c in $COMPONENTS; do npm test -- --config web-test-runner-lumo.config.js --group "$c"; done
+            fi
+        env:
+          COMPONENTS: ${{ inputs.components }}
+
+      - name: Visual tests — Aura
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 20
+          retry_wait_seconds: 60
+          max_attempts: 3
+          command: |
+            cd web-components
+            if [ -z "${COMPONENTS:-}" ]; then
+              npm test -- --config web-test-runner-aura.config.js --all
+            else
+              for c in $COMPONENTS; do npm test -- --config web-test-runner-aura.config.js --group "$c"; done
+            fi
+        env:
+          COMPONENTS: ${{ inputs.components }}
+
+      - name: Upload failed screenshots
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: web-components-visual-screenshots
+          path: |
+            web-components/packages/*/test/visual/base/screenshots/*/failed/*.png
+            web-components/packages/*/test/visual/lumo/screenshots/*/failed/*.png
+            web-components/packages/*/test/visual/aura/screenshots/dark/*/failed/*.png
+            web-components/packages/*/test/visual/aura/screenshots/default/*/failed/*.png
+            web-components/packages/vaadin-lumo-styles/test/visual/screenshots/failed/*.png
+          retention-days: 5
+          if-no-files-found: ignore
+
   results:
     name: Collect results
-    needs: [install, unit, wtr, its]
+    needs: [install, flow-components-unit, flow-components-wtr, flow-components-its, web-components-verify, web-components-unit, web-components-visual]
     if: always() && needs.install.result == 'success'
     runs-on: ubuntu-latest
     permissions:
@@ -371,7 +626,7 @@ jobs:
         if: hashFiles('surefire-reports/**/TEST-*.xml') != ''
         uses: dorny/test-reporter@a43b3a5f7366b97d083190328d2c652e1a8b6aa2
         with:
-          name: Unit Tests
+          name: Flow Components Unit Tests
           path: surefire-reports/**/TEST-*.xml
           reporter: java-junit
           list-tests: ${{ env.has_failures == 'true' && 'failed' || 'all' }}
@@ -382,7 +637,7 @@ jobs:
         if: hashFiles('wtr-reports/**/wtr-results.xml') != ''
         uses: dorny/test-reporter@a43b3a5f7366b97d083190328d2c652e1a8b6aa2
         with:
-          name: WTR Tests
+          name: Flow Components WTR Tests
           path: wtr-reports/**/wtr-results.xml
           reporter: java-junit
           list-tests: ${{ env.has_failures == 'true' && 'failed' || 'all' }}
@@ -393,14 +648,14 @@ jobs:
         if: hashFiles('failsafe-reports/**/TEST-*.xml') != ''
         uses: dorny/test-reporter@a43b3a5f7366b97d083190328d2c652e1a8b6aa2
         with:
-          name: Integration Tests
+          name: Flow Components Integration Tests
           path: failsafe-reports/**/TEST-*.xml
           reporter: java-junit
           list-tests: ${{ env.has_failures == 'true' && 'failed' || 'all' }}
           fail-on-error: 'false'
 
       - name: Upload merged error screenshots
-        if: needs.its.result != 'success'
+        if: needs.flow-components-its.result != 'success'
         uses: actions/upload-artifact@v6
         with:
           name: error-screenshots
@@ -431,4 +686,7 @@ jobs:
           [[ "${{ steps.unit-dorny.outputs.conclusion }}" == "failure" ]] && failed=true
           [[ "${{ steps.wtr-dorny.outputs.conclusion }}"  == "failure" ]] && failed=true
           [[ "${{ steps.it-dorny.outputs.conclusion }}"   == "failure" ]] && failed=true
+          [[ "${{ needs.web-components-verify.result }}" == "failure" ]] && failed=true
+          [[ "${{ needs.web-components-unit.result }}"   == "failure" ]] && failed=true
+          [[ "${{ needs.web-components-visual.result }}" == "failure" ]] && failed=true
           [[ "$failed" == "true" ]] && exit 1 || exit 0

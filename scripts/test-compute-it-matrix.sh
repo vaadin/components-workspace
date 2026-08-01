@@ -109,7 +109,7 @@ expected=$(printf '%s\n' \
 rm -rf "$root"
 pass "LPT 4-module distribution covers every module exactly once"
 
-# Case 7: many small modules cap at MAX_SHARDS=12.
+# Case 7: many small modules cap at MAX_SHARDS=6 (default).
 specs=()
 for ((i=1; i<=20; i++)); do specs+=("c$i:30"); done
 root=$(make_root "${specs[@]}")
@@ -117,14 +117,14 @@ names=""
 for ((i=1; i<=20; i++)); do names+="c$i "; done
 out=$(echo "$names" | "$BASH" "$SCRIPT" "$root")
 n=$(echo "$out" | jq -r '.include | length')
-[ "$n" = "12" ] || fail "20-module 30-each: got $n shards (want 12)"
+[ "$n" = "6" ] || fail "20-module 30-each: got $n shards (want 6)"
 all_modules=$(echo "$out" | jq -r '.include[].modules' | tr ',' '\n' | sort)
 expected=$(for ((i=1; i<=20; i++)); do
   echo "vaadin-c${i}-flow-parent/vaadin-c${i}-flow-integration-tests"
 done | sort)
 [ "$all_modules" = "$expected" ] || fail "20-module cap: modules across shards don't match expected set exactly (duplicates or missing entries)"
 rm -rf "$root"
-pass "20 modules at 30 ITs each -> 12 shards covering all modules"
+pass "20 modules at 30 ITs each -> 6 shards covering all modules"
 
 # Case 8: MAX_SHARDS=4 override.
 root=$(make_root "a:30" "b:30" "c:30" "d:30" "e:30" "f:30")
