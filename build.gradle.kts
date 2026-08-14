@@ -29,6 +29,35 @@ val npmInstall = tasks.named<NpmTask>("npmInstall") {
     outputs.dir("node_modules")
 }
 
+val applyWebComponentsPatches = tasks.register<Exec>("applyWebComponentsPatches") {
+    description = "Applies web-components/patches/*.patch to node_modules. " +
+        "Required because workspace `.npmrc` disables postinstall scripts."
+    group = "build"
+    workingDir = rootDir
+    commandLine("bash", "scripts/apply-web-components-patches.sh")
+    inputs.dir("web-components/patches")
+    inputs.dir("node_modules/@web")
+    outputs.file("node_modules/@web/test-runner-visual-regression/index.d.ts")
+    outputs.file("node_modules/@web/test-runner-visual-regression/dist/visualDiffCommand.js")
+    outputs.file("node_modules/@web/rollup-plugin-html/dist/output/emitAssets.js")
+    outputs.file("node_modules/lerna/dist/index.js")
+}
+
+val symlinkWebComponentsBin = tasks.register<Exec>("symlinkWebComponentsBin") {
+    description = "Creates web-components/node_modules/.bin symlink to the " +
+        "hoisted workspace-root bin, so upstream code finds lerna at the " +
+        "relative path it expects."
+    group = "build"
+    workingDir = rootDir
+    commandLine("bash", "scripts/setup-web-components-bin.sh")
+    inputs.dir("node_modules/.bin")
+    outputs.dir("web-components/node_modules/.bin")
+}
+
+npmInstall.configure {
+    finalizedBy(applyWebComponentsPatches, symlinkWebComponentsBin)
+}
+
 tasks.register("install") {
     description = "Installs dependencies for all subprojects."
     group = "build"

@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       components:
-        description: 'Space-separated names (e.g. "grid combo-box"), empty = all overlay modules'
+        description: 'Space-separated names (e.g. "grid combo-box"), empty = all component modules'
         required: false
         default: ''
 
@@ -16,6 +16,10 @@ concurrency:
 
 permissions:
   contents: read
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
   install:
@@ -43,6 +47,16 @@ jobs:
         with:
           node-version: '24'
 
+      - name: Cache Gradle
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.gradle/wrapper/dists
+            ~/.gradle/caches/modules-2
+          key: ${{ runner.os }}-gradle-${{ hashFiles('gradle/wrapper/gradle-wrapper.properties', 'build.gradle.kts', 'settings.gradle.kts', 'gradle/*.gradle.kts') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
       - name: Compute cache key
         id: key
         run: |
@@ -67,21 +81,6 @@ jobs:
         if: steps.cache.outputs.cache-hit != 'true'
         run: ./gradlew install --no-daemon
 
-      - name: Apply web-components patches
-        if: steps.cache.outputs.cache-hit != 'true'
-        working-directory: web-components
-        run: |
-          for p in patches/*.patch; do
-            echo "Applying $p"
-            patch -p1 -d .. < "$p"
-          done
-
-      - name: Symlink web-components/node_modules/.bin to workspace root
-        if: steps.cache.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p web-components/node_modules
-          ln -snf ../../node_modules/.bin web-components/node_modules/.bin
-
       - name: Save install cache
         if: steps.cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v5
@@ -100,8 +99,8 @@ jobs:
         env:
           COMPONENTS: ${{ inputs.components }}
         run: |
-          names=$(COMPONENTS="$COMPONENTS" bash scripts/overlay-component-names.sh)
-          echo "Overlay names: $names"
+          names=$(COMPONENTS="$COMPONENTS" bash scripts/component-names.sh)
+          echo "Component names: $names"
           matrix=$(echo "$names" | bash scripts/compute-it-matrix.sh)
           echo "$matrix" | jq .
           {
@@ -121,33 +120,11 @@ jobs:
           submodules: recursive
           fetch-depth: 1
 
-      - name: Setup JDK 21
-        uses: actions/setup-java@v5
+      - uses: ./.github/actions/setup-workspace
         with:
-          java-version: '21'
-          distribution: 'temurin'
-          cache: 'maven'
-
-      - name: Setup Node
-        uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-
-      - name: Restore install cache
-        uses: actions/cache/restore@v5
-        with:
-          key: ${{ needs.install.outputs.cache-key }}
-          path: |
-            ~/.m2/repository/com/vaadin
-            node_modules
-            web-components/node_modules
-            web-components/.yarn
-            flow-components/**/node_modules
-            flow-components/vaadin-charts-flow-parent/vaadin-charts-flow-svg-generator/src/main/resources/META-INF/frontend/generated
-          fail-on-cache-miss: true
-
-      - name: Sync overlay symlinks
-        run: bash scripts/sync-flow-overlays.sh
+          cache-key: ${{ needs.install.outputs.cache-key }}
+          setup-java: 'true'
+          sync-overlays: 'true'
 
       - name: Run unit tests
         run: |
@@ -169,49 +146,21 @@ jobs:
     needs: install
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      TB_LICENSE: ${{ secrets.TB_LICENSE }}
     steps:
       - uses: actions/checkout@v6
         with:
           submodules: recursive
           fetch-depth: 1
 
-      - name: Setup JDK 21
-        uses: actions/setup-java@v5
+      - uses: ./.github/actions/setup-workspace
         with:
-          java-version: '21'
-          distribution: 'temurin'
-          cache: 'maven'
+          cache-key: ${{ needs.install.outputs.cache-key }}
+          setup-java: 'true'
+          sync-overlays: 'true'
 
-      - name: Setup Node
-        uses: actions/setup-node@v6
+      - uses: ./.github/actions/install-tb-license
         with:
-          node-version: '24'
-
-      - name: Restore install cache
-        uses: actions/cache/restore@v5
-        with:
-          key: ${{ needs.install.outputs.cache-key }}
-          path: |
-            ~/.m2/repository/com/vaadin
-            node_modules
-            web-components/node_modules
-            web-components/.yarn
-            flow-components/**/node_modules
-            flow-components/vaadin-charts-flow-parent/vaadin-charts-flow-svg-generator/src/main/resources/META-INF/frontend/generated
-          fail-on-cache-miss: true
-
-      - name: Sync overlay symlinks
-        run: bash scripts/sync-flow-overlays.sh
-
-      - name: Install TestBench license
-        if: env.TB_LICENSE != ''
-        run: |
-          mkdir -p ~/.vaadin
-          user="${TB_LICENSE%%/*}"
-          key="${TB_LICENSE#*/}"
-          echo "{\"username\":\"${user}\",\"proKey\":\"${key}\"}" > ~/.vaadin/proKey
+          tb-license: ${{ secrets.TB_LICENSE }}
 
       - name: Run WTR tests
         env:
@@ -233,8 +182,6 @@ jobs:
     if: needs.install.outputs.it-matrix != '' && fromJson(needs.install.outputs.it-matrix).include[0] != null
     runs-on: ubuntu-latest
     timeout-minutes: 120
-    env:
-      TB_LICENSE: ${{ secrets.TB_LICENSE }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.install.outputs.it-matrix) }}
@@ -244,41 +191,15 @@ jobs:
           submodules: recursive
           fetch-depth: 1
 
-      - name: Setup JDK 21
-        uses: actions/setup-java@v5
+      - uses: ./.github/actions/setup-workspace
         with:
-          java-version: '21'
-          distribution: 'temurin'
-          cache: 'maven'
+          cache-key: ${{ needs.install.outputs.cache-key }}
+          setup-java: 'true'
+          sync-overlays: 'true'
 
-      - name: Setup Node
-        uses: actions/setup-node@v6
+      - uses: ./.github/actions/install-tb-license
         with:
-          node-version: '24'
-
-      - name: Restore install cache
-        uses: actions/cache/restore@v5
-        with:
-          key: ${{ needs.install.outputs.cache-key }}
-          path: |
-            ~/.m2/repository/com/vaadin
-            node_modules
-            web-components/node_modules
-            web-components/.yarn
-            flow-components/**/node_modules
-            flow-components/vaadin-charts-flow-parent/vaadin-charts-flow-svg-generator/src/main/resources/META-INF/frontend/generated
-          fail-on-cache-miss: true
-
-      - name: Sync overlay symlinks
-        run: bash scripts/sync-flow-overlays.sh
-
-      - name: Install TestBench license
-        if: env.TB_LICENSE != ''
-        run: |
-          mkdir -p ~/.vaadin
-          user="${TB_LICENSE%%/*}"
-          key="${TB_LICENSE#*/}"
-          echo "{\"username\":\"${user}\",\"proKey\":\"${key}\"}" > ~/.vaadin/proKey
+          tb-license: ${{ secrets.TB_LICENSE }}
 
       - name: Compute artifact shard id
         id: shardid
@@ -331,27 +252,11 @@ jobs:
       - uses: actions/checkout@v6
         with:
           submodules: recursive
-          # depth-1 is sufficient: `npm test -- --all` short-circuits the
-          # lerna-based `getChangedPackages()` in web-components/wtr-utils.js.
           fetch-depth: 1
 
-      - name: Setup Node
-        uses: actions/setup-node@v6
+      - uses: ./.github/actions/setup-workspace
         with:
-          node-version: '24'
-
-      - name: Restore install cache
-        uses: actions/cache/restore@v5
-        with:
-          key: ${{ needs.install.outputs.cache-key }}
-          path: |
-            ~/.m2/repository/com/vaadin
-            node_modules
-            web-components/node_modules
-            web-components/.yarn
-            flow-components/**/node_modules
-            flow-components/vaadin-charts-flow-parent/vaadin-charts-flow-svg-generator/src/main/resources/META-INF/frontend/generated
-          fail-on-cache-miss: true
+          cache-key: ${{ needs.install.outputs.cache-key }}
 
       - name: Lint
         working-directory: web-components
@@ -361,27 +266,13 @@ jobs:
         working-directory: web-components
         env:
           COMPONENTS: ${{ inputs.components }}
-        run: |
-          if [ -z "${COMPONENTS:-}" ]; then
-            npm test -- --config web-test-runner-snapshots.config.js --all
-          else
-            for c in $COMPONENTS; do
-              npm test -- --config web-test-runner-snapshots.config.js --group "$c"
-            done
-          fi
+        run: bash ../scripts/run-wtr-config.sh web-test-runner-snapshots.config.js
 
       - name: Integration tests
         working-directory: web-components
         env:
           COMPONENTS: ${{ inputs.components }}
-        run: |
-          if [ -z "${COMPONENTS:-}" ]; then
-            npm test -- --config web-test-runner-it.config.js --all
-          else
-            for c in $COMPONENTS; do
-              npm test -- --config web-test-runner-it.config.js --group "$c"
-            done
-          fi
+        run: bash ../scripts/run-wtr-config.sh web-test-runner-it.config.js
 
   web-components-unit:
     name: Web Components Unit (${{ matrix.browser }})
@@ -393,38 +284,22 @@ jobs:
       matrix:
         include:
           - browser: chrome
-            cmd: npm test --
+            config: ''
           - browser: firefox
-            cmd: npm test -- --config web-test-runner-firefox.config.js
+            config: 'web-test-runner-firefox.config.js'
             playwright: firefox
           - browser: webkit
-            cmd: npm test -- --config web-test-runner-webkit.config.js
+            config: 'web-test-runner-webkit.config.js'
             playwright: webkit
     steps:
       - uses: actions/checkout@v6
         with:
           submodules: recursive
-          # depth-1 is sufficient: `npm test -- --all` short-circuits the
-          # lerna-based `getChangedPackages()` in web-components/wtr-utils.js.
           fetch-depth: 1
 
-      - name: Setup Node
-        uses: actions/setup-node@v6
+      - uses: ./.github/actions/setup-workspace
         with:
-          node-version: '24'
-
-      - name: Restore install cache
-        uses: actions/cache/restore@v5
-        with:
-          key: ${{ needs.install.outputs.cache-key }}
-          path: |
-            ~/.m2/repository/com/vaadin
-            node_modules
-            web-components/node_modules
-            web-components/.yarn
-            flow-components/**/node_modules
-            flow-components/vaadin-charts-flow-parent/vaadin-charts-flow-svg-generator/src/main/resources/META-INF/frontend/generated
-          fail-on-cache-miss: true
+          cache-key: ${{ needs.install.outputs.cache-key }}
 
       - name: Cache Playwright browsers
         if: matrix.playwright
@@ -442,15 +317,7 @@ jobs:
         working-directory: web-components
         env:
           COMPONENTS: ${{ inputs.components }}
-          CMD: ${{ matrix.cmd }}
-        run: |
-          if [ -z "${COMPONENTS:-}" ]; then
-            $CMD --all
-          else
-            for c in $COMPONENTS; do
-              $CMD --group "$c"
-            done
-          fi
+        run: bash ../scripts/run-wtr-config.sh "${{ matrix.config }}"
 
   web-components-visual:
     name: Web Components Visual
@@ -464,13 +331,17 @@ jobs:
     env:
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
     steps:
+      - name: Install zstd
+        run: apt-get update && apt-get install -y zstd
+
       - uses: actions/checkout@v6
         with:
           submodules: recursive
-          # depth-1 is sufficient: `npm test -- --all` short-circuits the
-          # lerna-based `getChangedPackages()` in web-components/wtr-utils.js.
-          # The explicit `git fetch origin main` below populates origin/main.
           fetch-depth: 1
+
+      - uses: ./.github/actions/setup-workspace
+        with:
+          cache-key: ${{ needs.install.outputs.cache-key }}
 
       - name: Fix git safe directory
         run: git config --global --add safe.directory $GITHUB_WORKSPACE
@@ -478,40 +349,13 @@ jobs:
       - name: Fetch origin/main
         run: git fetch origin main
 
-      - name: Setup Node
-        uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-
-      - name: Install zstd
-        run: apt-get update && apt-get install -y zstd
-
-      - name: Restore install cache
-        uses: actions/cache/restore@v5
-        with:
-          key: ${{ needs.install.outputs.cache-key }}
-          path: |
-            ~/.m2/repository/com/vaadin
-            node_modules
-            web-components/node_modules
-            web-components/.yarn
-            flow-components/**/node_modules
-            flow-components/vaadin-charts-flow-parent/vaadin-charts-flow-svg-generator/src/main/resources/META-INF/frontend/generated
-          fail-on-cache-miss: true
-
       - name: Visual tests — base
         uses: nick-fields/retry@v3
         with:
           timeout_minutes: 20
           retry_wait_seconds: 60
           max_attempts: 3
-          command: |
-            cd web-components
-            if [ -z "${COMPONENTS:-}" ]; then
-              npm test -- --config web-test-runner-base.config.js --all
-            else
-              for c in $COMPONENTS; do npm test -- --config web-test-runner-base.config.js --group "$c"; done
-            fi
+          command: cd web-components && bash ../scripts/run-wtr-config.sh web-test-runner-base.config.js
         env:
           COMPONENTS: ${{ inputs.components }}
 
@@ -521,13 +365,7 @@ jobs:
           timeout_minutes: 20
           retry_wait_seconds: 60
           max_attempts: 3
-          command: |
-            cd web-components
-            if [ -z "${COMPONENTS:-}" ]; then
-              npm test -- --config web-test-runner-lumo.config.js --all
-            else
-              for c in $COMPONENTS; do npm test -- --config web-test-runner-lumo.config.js --group "$c"; done
-            fi
+          command: cd web-components && bash ../scripts/run-wtr-config.sh web-test-runner-lumo.config.js
         env:
           COMPONENTS: ${{ inputs.components }}
 
@@ -537,13 +375,7 @@ jobs:
           timeout_minutes: 20
           retry_wait_seconds: 60
           max_attempts: 3
-          command: |
-            cd web-components
-            if [ -z "${COMPONENTS:-}" ]; then
-              npm test -- --config web-test-runner-aura.config.js --all
-            else
-              for c in $COMPONENTS; do npm test -- --config web-test-runner-aura.config.js --group "$c"; done
-            fi
+          command: cd web-components && bash ../scripts/run-wtr-config.sh web-test-runner-aura.config.js
         env:
           COMPONENTS: ${{ inputs.components }}
 
@@ -679,14 +511,8 @@ jobs:
               gh api -X DELETE "repos/$GH_REPO/actions/artifacts/$id" || true
             done
 
-      - name: Fail if any test failed
+      - name: Fail if any needed job failed
         if: always()
         run: |
-          failed=false
-          [[ "${{ steps.unit-dorny.outputs.conclusion }}" == "failure" ]] && failed=true
-          [[ "${{ steps.wtr-dorny.outputs.conclusion }}"  == "failure" ]] && failed=true
-          [[ "${{ steps.it-dorny.outputs.conclusion }}"   == "failure" ]] && failed=true
-          [[ "${{ needs.web-components-verify.result }}" == "failure" ]] && failed=true
-          [[ "${{ needs.web-components-unit.result }}"   == "failure" ]] && failed=true
-          [[ "${{ needs.web-components-visual.result }}" == "failure" ]] && failed=true
-          [[ "$failed" == "true" ]] && exit 1 || exit 0
+          failed=$(echo '${{ toJson(needs) }}' | jq -r '[to_entries[] | select(.value.result == "failure") | .key] | join(",")')
+          [ -z "$failed" ] || { echo "Failed jobs: $failed"; exit 1; }
