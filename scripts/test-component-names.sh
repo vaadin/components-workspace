@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Tests scripts/overlay-component-names.sh against a fixture overlay tree.
-# Run from workspace root: bash scripts/test-overlay-component-names.sh
+# Tests scripts/component-names.sh against a fixture overlay tree.
+# Run from workspace root: bash scripts/test-component-names.sh
 
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
-SCRIPT="$HERE/overlay-component-names.sh"
+SCRIPT="$HERE/component-names.sh"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 pass() { echo "ok: $*"; }
@@ -28,7 +28,7 @@ make_overlay date-picker
 # Case 1: default — all four names, sorted.
 out=$(bash "$SCRIPT" "$FIXTURE")
 [ "$out" = "button combo-box date-picker grid" ] || fail "default: got [$out]"
-pass "default lists all overlay names, sorted"
+pass "default lists all component names, sorted"
 
 # Case 2: COMPONENTS filter — narrow to two.
 out=$(COMPONENTS="grid date-picker" bash "$SCRIPT" "$FIXTURE")
@@ -38,7 +38,7 @@ pass "COMPONENTS filter narrows the set"
 # Case 3: COMPONENTS filter with a name not in overlays — drops it.
 out=$(COMPONENTS="grid bogus" bash "$SCRIPT" "$FIXTURE")
 [ "$out" = "grid" ] || fail "filter-with-bogus: got [$out]"
-pass "COMPONENTS filter drops names not in overlay tree"
+pass "COMPONENTS filter drops names not in component tree"
 
 # Case 4: missing source directory — exit 1.
 if bash "$SCRIPT" /tmp/this-does-not-exist-$$ >/dev/null 2>&1; then

@@ -1,0 +1,20 @@
+name: Install TestBench license
+description: Writes ~/.vaadin/proKey from the TB_LICENSE secret. Skips silently when the input is empty (e.g. fork PRs without the secret).
+
+inputs:
+  tb-license:
+    description: TB_LICENSE secret value formatted as user/key.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - if: inputs.tb-license != ''
+      shell: bash
+      env:
+        TB_LICENSE: ${{ inputs.tb-license }}
+      run: |
+        mkdir -p ~/.vaadin
+        user="${TB_LICENSE%%/*}"
+        key="${TB_LICENSE#*/}"
+        printf '{"username":"%s","proKey":"%s"}\n' "$user" "$key" > ~/.vaadin/proKey
