@@ -16,7 +16,7 @@ dependencies {
     implementation("org.apache.maven.resolver:maven-resolver-connector-basic:1.9.22")
     implementation("org.apache.maven.resolver:maven-resolver-transport-http:1.9.22")
     implementation("com.diffplug.spotless:spotless-plugin-gradle:6.25.0")
-    implementation("com.vaadin:flow-gradle-plugin:25.3-SNAPSHOT")
+    implementation("com.vaadin:flow-gradle-plugin:25.4-SNAPSHOT")
     implementation("org.gretty:gretty:4.1.6")
 
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
