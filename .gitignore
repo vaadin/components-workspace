@@ -1,5 +1,6 @@
 .idea/
 .gradle/
+.kotlin/
 build/
 node_modules
 docs/superpowers/demo-*.md

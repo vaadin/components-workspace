@@ -74,6 +74,29 @@ To exclude a non-overlaid IT module from the npm workspaces glob, add a `!`-pref
 
 See `docs/superpowers/specs/2026-06-04-it-npm-workspace-design.md`.
 
+### Gradle-native pilot modules
+
+A subset of `flow-components` modules is built natively by Gradle (no `mvn` invocation), reading their `pom.xml` files via the included build at `gradle/plugins/`. Current pilot scope: `vaadin-flow-components-shared-parent/*` and `vaadin-button-flow-parent/*` (5 leaf modules).
+
+Pilot subprojects share Maven's `target/` output layout and publish to Maven Local, so `./gradlew :flow-components:build` runs them via Gradle and then `mvn -DskipTests install` over the rest of the reactor; mvn skips already-built pilot work (where Gradle 8's source-set layout permits — see follow-up below).
+
+Per-module entry points:
+
+```bash
+./gradlew :flow-components:vaadin-button-flow-parent:vaadin-button-flow:test
+./gradlew :flow-components:vaadin-button-flow-parent:vaadin-button-flow-integration-tests:integrationTest
+```
+
+To add a new pilot module: create `gradle/flow-components/<parent>/<module>.gradle.kts` containing one line — `plugins { id("vaadin.workspace.java-library") }` (or `vaadin.workspace.integration-tests` for IT modules) — and run `./gradlew :flow-components:build`.
+
+Design: `docs/superpowers/specs/2026-06-12-gradle-maven-bridge-design.md`. Implementation plan: `docs/superpowers/plans/2026-06-12-gradle-maven-bridge.md`.
+
+Known follow-ups:
+
+- Gradle 8 forbids overlapping source-set outputs, so Gradle's compiled `.class` files land in `target/classes/java/...` rather than the canonical Maven `target/classes/...`. Maven still compiles pilot modules in its install pass. Maven Local publishing remains the working complementarity mechanism.
+- The `vaadin.workspace.integration-tests` plugin forces `productionMode = true` whenever the IT's POM declares `flow-maven-plugin` configuration. Dev-mode IT runs (with hot reload) are not yet reachable from Gradle.
+- Pilot subproject unit tests run in both the Gradle path and Maven path of CI; this duplication is acceptable for the current pilot scope and will be pruned once Gradle parity is proven for more components.
+
 ## Cross-Repo Integration
 
 Local npm linking between `web-components` and `flow-components` is **not** set up. `flow-components` consumes `web-components` via the npm registry. To test unreleased `web-components` changes against `flow-components`, you must publish (or link manually) — this is listed as a future workspace concern in `docs/superpowers/specs/`.

@@ -53,6 +53,28 @@ git submodule update --remote --merge
 git submodule status
 ```
 
+### Ignore submodule-generated content
+
+The flow-components integration tests generate build artifacts under
+`src/main/bundles/` that clutter `git status`. These can be excluded
+from the workspace's git index without modifying the submodule itself.
+
+Edit the submodule's internal exclude file:
+
+```bash
+# Add this pattern (replacing any existing bundles pattern):
+echo 'vaadin-*-flow-parent/vaadin-*-flow-integration-tests/src/main/bundles/' \
+  >> .git/modules/flow-components/info/exclude
+
+# Also for web-components (if applicable):
+echo '**/integration-tests/src/main/bundles/' \
+  >> .git/modules/web-components/info/exclude
+```
+
+This is **local only** — it lives in the workspace's `.git/modules/` directory and is not committed to either submodule.
+
+> **Note**: Running `git submodule update --remote` re-initializes the submodule's git database and will reset `.git/modules/<name>/info/exclude`. You'll need to re-apply the pattern after such an update.
+
 ## Building
 
 The workspace exposes Gradle tasks that orchestrate both submodules:

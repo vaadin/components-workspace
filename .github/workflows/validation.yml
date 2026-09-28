@@ -79,7 +79,7 @@ jobs:
 
       - name: Workspace install
         if: steps.cache.outputs.cache-hit != 'true'
-        run: ./gradlew install --no-daemon
+        run: ./gradlew :flow-components:build --no-daemon
 
       - name: Save install cache
         if: steps.cache.outputs.cache-hit != 'true'
@@ -243,6 +243,44 @@ jobs:
           retention-days: 5
           if-no-files-found: ignore
 
+  flow-components-pilot-gradle:
+    name: Flow Components Pilot (Gradle)
+    needs: install
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - uses: ./.github/actions/setup-workspace
+        with:
+          cache-key: ${{ needs.install.outputs.cache-key }}
+          setup-java: 'true'
+          sync-overlays: 'true'
+
+      - uses: ./.github/actions/install-tb-license
+        with:
+          tb-license: ${{ secrets.TB_LICENSE }}
+
+      - name: Run pilot Gradle tasks
+        run: |
+          ./gradlew :flow-components:vaadin-button-flow-parent:vaadin-button-flow:test \
+                    :flow-components:vaadin-button-flow-parent:vaadin-button-flow-integration-tests:integrationTest \
+                    --stacktrace --info
+
+      - name: Upload pilot test reports
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: pilot-gradle-reports
+          path: |
+            flow-components/**/target/surefire-reports/TEST-*.xml
+            flow-components/**/target/failsafe-reports/TEST-*.xml
+          retention-days: 1
+          if-no-files-found: ignore
+
   web-components-verify:
     name: Web Components Verify
     needs: install
@@ -395,7 +433,7 @@ jobs:
 
   results:
     name: Collect results
-    needs: [install, flow-components-unit, flow-components-wtr, flow-components-its, web-components-verify, web-components-unit, web-components-visual]
+    needs: [install, flow-components-unit, flow-components-wtr, flow-components-its, flow-components-pilot-gradle, web-components-verify, web-components-unit, web-components-visual]
     if: always() && needs.install.result == 'success'
     runs-on: ubuntu-latest
     permissions:

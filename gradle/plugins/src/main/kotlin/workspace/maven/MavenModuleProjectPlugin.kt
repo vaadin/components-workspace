@@ -1,0 +1,131 @@
+package workspace.maven
+
+import org.gradle.api.Action
+import org.gradle.api.Plugin
+import org.gradle.api.Project
+import org.gradle.api.invocation.Gradle
+import java.net.URI
+
+class MavenModuleProjectPlugin : Plugin<Project> {
+
+    override fun apply(project: Project) {
+        val pomFile = project.projectDir.resolve("pom.xml")
+        check(pomFile.exists()) { "workspace.maven-module requires ${pomFile} to exist" }
+
+        val model = PomReader().read(pomFile)
+
+        val registry = project.gradle.sharedServices.registerIfAbsent(
+            "gavRegistry",
+            GavRegistryBuildService::class.java
+        ) {}
+        registry.get().register(model.groupId, model.artifactId, project.path)
+
+        // 1. Repositories — Maven defaults + anything declared in the resolved POM.
+        project.repositories.mavenLocal()
+        project.repositories.mavenCentral()
+        model.repositories.forEach { repo ->
+            project.repositories.maven { url = URI.create(repo.url) }
+        }
+
+        // 2. Expose the parsed model for build files and Layer 2 conventions to read.
+        project.extensions.add("mavenModel", model)
+
+        project.plugins.withId("java") {
+            // Mirror Maven's flat `target/classes` and `target/test-classes` layout, but
+            // route compiled classes and processed resources to sibling sub-folders so
+            // Gradle 8's strict implicit-dependency check is satisfied (compileJava and
+            // processResources would otherwise share an output directory). Both folders
+            // are still on each downstream classpath via the source-set output.
+            project.extensions.configure(org.gradle.api.tasks.SourceSetContainer::class.java) {
+                named("main") {
+                    java.destinationDirectory.set(project.file("target/classes/java"))
+                    output.setResourcesDir(project.file("target/classes/resources"))
+                }
+                named("test") {
+                    java.destinationDirectory.set(project.file("target/test-classes/java"))
+                    output.setResourcesDir(project.file("target/test-classes/resources"))
+                }
+            }
+            project.tasks.named("jar", org.gradle.api.tasks.bundling.Jar::class.java) {
+                destinationDirectory.set(project.file("target"))
+                archiveBaseName.set(model.artifactId)
+                archiveVersion.set(model.version)
+            }
+            project.tasks.named("clean", org.gradle.api.tasks.Delete::class.java) {
+                delete(project.file("target"))
+            }
+            project.plugins.apply("maven-publish")
+            project.extensions.configure(org.gradle.api.publish.PublishingExtension::class.java) {
+                publications.create("maven", org.gradle.api.publish.maven.MavenPublication::class.java) {
+                    // The component to publish (java vs. web) is decided lazily — afterEvaluate
+                    // ensures the war plugin (if any) has been applied so we pick the correct one.
+                    groupId = model.groupId
+                    artifactId = model.artifactId
+                    version = model.version
+                }
+            }
+            project.afterEvaluate {
+                project.extensions.configure(org.gradle.api.publish.PublishingExtension::class.java) {
+                    publications.named("maven", org.gradle.api.publish.maven.MavenPublication::class.java) {
+                        val componentName = if (project.plugins.hasPlugin("war")) "web" else "java"
+                        from(project.components.getByName(componentName))
+                    }
+                }
+            }
+        }
+        project.plugins.withId("war") {
+            project.tasks.named("war", org.gradle.api.tasks.bundling.War::class.java) {
+                destinationDirectory.set(project.file("target"))
+                archiveBaseName.set(model.artifactId)
+                archiveVersion.set(model.version)
+                // IT classpaths often pull the same jar via several routes (e.g. once
+                // through `vaadin-button-flow`, again through `vaadin-flow-components-test-util`).
+                // Maven dedupes silently; Gradle 8 demands an explicit strategy.
+                duplicatesStrategy = org.gradle.api.file.DuplicatesStrategy.EXCLUDE
+            }
+        }
+
+        // Defer cross-project dep wiring until all subprojects have registered their GAVs.
+        val extras = project.gradle.extensions
+        if (extras.findByName("mavenModuleDepsHookInstalled") == null) {
+            extras.add("mavenModuleDepsHookInstalled", true)
+            val depWiringAction = object : Action<Gradle> {
+                override fun execute(gradle: Gradle) {
+                    registry.get().finalize()
+                    val mapper = DependencyMapper(registry.get())
+                    gradle.rootProject.allprojects.forEach { p: Project ->
+                        val pModel = p.extensions.findByName("mavenModel") as? MavenModel ?: return@forEach
+                        // Pom-packaging / no-java projects (e.g. the :flow-components aggregator) don't expose
+                        // implementation/testImplementation configurations — skip dep wiring for them.
+                        if (!p.plugins.hasPlugin("java")) return@forEach
+                        pModel.dependencyManagement
+                            .filter { it.scope == "import" && it.type == "pom" }
+                            .forEach { dep ->
+                                val spec = mapper.mapBomImport(dep) as GradleDependencySpec.Platform
+                                p.dependencies.add(spec.configuration, p.dependencies.platform(spec.coordinate))
+                            }
+                        pModel.dependencies.forEach depLoop@{ dep ->
+                            if (dep.scope == "provided") {
+                                mapper.mapProvided(dep).forEach { spec ->
+                                    p.dependencies.add(spec.configuration, (spec as GradleDependencySpec.External).coordinate)
+                                }
+                                return@depLoop
+                            }
+                            if (dep.scope == "import" && dep.type == "pom") return@depLoop
+                            val spec = mapper.map(dep)
+                            when (spec) {
+                                is GradleDependencySpec.ProjectRef ->
+                                    p.dependencies.add(spec.configuration, p.project(spec.projectPath))
+                                is GradleDependencySpec.External ->
+                                    p.dependencies.add(spec.configuration, spec.coordinate)
+                                is GradleDependencySpec.Platform ->
+                                    p.dependencies.add(spec.configuration, p.dependencies.platform(spec.coordinate))
+                            }
+                        }
+                    }
+                }
+            }
+            project.gradle.projectsEvaluated(depWiringAction)
+        }
+    }
+}
